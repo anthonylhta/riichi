@@ -11,7 +11,7 @@
 	} from '$lib/stores/game';
 	import { tileLabel, suitClass } from '$lib/game/tiles';
 
-	let selectedTileId: number | null = null;
+	let selectedTileId = $state<number | null>(null);
 
 	onMount(async () => {
 		await startGame();
