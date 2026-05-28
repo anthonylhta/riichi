@@ -103,3 +103,27 @@ export async function devSetChiClaim() {
 		})
 	);
 }
+
+// Furiten setup: player is in tenpai waiting on S5, isTempFuriten=true, and seat 1 just
+// discarded S5. Ron button should be absent; 振聴 badge should show.
+export async function devSetFuriten() {
+	const state = get(gameState);
+	if (!state) return;
+
+	const hand = TENPAI_13.map(dt); // 13 tiles, tanki wait on S5 (code 23)
+	const discard = dt(23); // S5 — the winning tile
+	const players = state.players.map((p, i) =>
+		i === 0 ? { ...p, hand, melds: [], isTempFuriten: true, isFuriten: false } : p
+	) as GameState['players'];
+
+	gameState.set(
+		patch(state, {
+			players,
+			lastDiscard: discard,
+			lastDiscardSeat: 1,
+			phase: 'claim_decision',
+			pendingRon: null, // blocked by furiten
+			claimOptions: []
+		})
+	);
+}

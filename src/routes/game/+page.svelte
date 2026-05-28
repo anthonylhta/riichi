@@ -46,6 +46,7 @@
 	let devSetRonClaim: (() => Promise<void>) | null = null;
 	let devSetPonClaim: (() => Promise<void>) | null = null;
 	let devSetChiClaim: (() => Promise<void>) | null = null;
+	let devSetFuriten: (() => Promise<void>) | null = null;
 
 	if (isDev) {
 		import('$lib/game/devCheats').then((m) => {
@@ -54,6 +55,7 @@
 			devSetRonClaim = m.devSetRonClaim;
 			devSetPonClaim = m.devSetPonClaim;
 			devSetChiClaim = m.devSetChiClaim;
+			devSetFuriten = m.devSetFuriten;
 		});
 	}
 
@@ -100,6 +102,7 @@
 				<button class="dev-btn" onclick={() => devSetRonClaim?.()}>Ron claim</button>
 				<button class="dev-btn" onclick={() => devSetPonClaim?.()}>Pon claim</button>
 				<button class="dev-btn" onclick={() => devSetChiClaim?.()}>Chi claim</button>
+				<button class="dev-btn" onclick={() => devSetFuriten?.()}>Furiten (no ron)</button>
 			</div>
 		{/if}
 
