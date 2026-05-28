@@ -51,6 +51,9 @@
 	let devSetPonClaim: (() => Promise<void>) | null = null;
 	let devSetChiClaim: (() => Promise<void>) | null = null;
 	let devSetFuriten: (() => Promise<void>) | null = null;
+	let devSetAnkan: (() => Promise<void>) | null = null;
+	let devSetKakan: (() => Promise<void>) | null = null;
+	let devSetDaiminkan: (() => Promise<void>) | null = null;
 
 	if (isDev) {
 		import('$lib/game/devCheats').then((m) => {
@@ -60,6 +63,9 @@
 			devSetPonClaim = m.devSetPonClaim;
 			devSetChiClaim = m.devSetChiClaim;
 			devSetFuriten = m.devSetFuriten;
+			devSetAnkan = m.devSetAnkan;
+			devSetKakan = m.devSetKakan;
+			devSetDaiminkan = m.devSetDaiminkan;
 		});
 	}
 
@@ -113,6 +119,9 @@
 				<button class="dev-btn" onclick={() => devSetPonClaim?.()}>Pon claim</button>
 				<button class="dev-btn" onclick={() => devSetChiClaim?.()}>Chi claim</button>
 				<button class="dev-btn" onclick={() => devSetFuriten?.()}>Furiten (no ron)</button>
+				<button class="dev-btn" onclick={() => devSetAnkan?.()}>Ankan (4-of-a-kind)</button>
+				<button class="dev-btn" onclick={() => devSetKakan?.()}>Kakan (extend pon)</button>
+				<button class="dev-btn" onclick={() => devSetDaiminkan?.()}>Daiminkan claim</button>
 			</div>
 		{/if}
 

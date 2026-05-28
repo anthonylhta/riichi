@@ -104,6 +104,67 @@ export async function devSetChiClaim() {
 	);
 }
 
+// Ankan setup: player has 4 S5s (code 23) in hand — "Ankan 暗槓" button should appear.
+export async function devSetAnkan() {
+	const state = get(gameState);
+	if (!state) return;
+	const t1 = dt(23);
+	const t2 = dt(23);
+	const t3 = dt(23);
+	const t4 = dt(23);
+	const filler = [2, 3, 4, 5, 6, 7, 11, 12, 13].map(dt); // 9 filler tiles
+	const hand = [t1, t2, t3, t4, ...filler]; // 13 tiles total
+	const players = state.players.map((p, i) =>
+		i === 0 ? { ...p, hand, melds: [] } : p
+	) as GameState['players'];
+	gameState.set(patch(state, { phase: 'player_discard', currentSeat: 0, players }));
+}
+
+// Kakan setup: player has an existing pon of S5 + one S5 in hand — "Kakan 加槓" button should appear.
+export async function devSetKakan() {
+	const state = get(gameState);
+	if (!state) return;
+	const ponA = dt(23);
+	const ponB = dt(23);
+	const ponC = dt(23);
+	const addedTile = dt(23); // the 4th S5 to extend the pon
+	const filler = [2, 3, 4, 5, 6, 7, 11, 12, 13, 20].map(dt); // 10 filler tiles
+	const hand = [addedTile, ...filler]; // 11 tiles in hand (13 - 2 used in meld logic)
+	const ponMeld = {
+		type: 'pon' as const,
+		tiles: [ponA, ponB, ponC],
+		calledFrom: 1 as Seat
+	};
+	const players = state.players.map((p, i) =>
+		i === 0 ? { ...p, hand, melds: [ponMeld] } : p
+	) as GameState['players'];
+	gameState.set(patch(state, { phase: 'player_discard', currentSeat: 0, players }));
+}
+
+// Daiminkan setup: player has 3 S5s; seat 1 just discarded S5 — "Kan 槓" button should appear in claim overlay.
+export async function devSetDaiminkan() {
+	const state = get(gameState);
+	if (!state) return;
+	const tA = dt(23);
+	const tB = dt(23);
+	const tC = dt(23);
+	const discard = dt(23); // S5 discarded by seat 1
+	const filler = [2, 3, 4, 5, 6, 7, 11, 12, 13, 20].map(dt); // 10 filler tiles
+	const hand = [tA, tB, tC, ...filler]; // 13 tiles
+	const players = state.players.map((p, i) =>
+		i === 0 ? { ...p, hand, melds: [] } : p
+	) as GameState['players'];
+	const draft = patch(state, { players, lastDiscard: discard, lastDiscardSeat: 1 as Seat });
+	const ron = await checkRon(draft, 0, discard, 1);
+	gameState.set(
+		patch(draft, {
+			phase: 'claim_decision',
+			pendingRon: ron,
+			claimOptions: [{ type: 'kan', handTiles: [tA, tB, tC] }]
+		})
+	);
+}
+
 // Furiten setup: player is in tenpai waiting on S5, isTempFuriten=true, and seat 1 just
 // discarded S5. Ron button should be absent; 振聴 badge should show.
 export async function devSetFuriten() {
