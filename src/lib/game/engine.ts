@@ -73,6 +73,8 @@ function initRound(
 		turnCount: 0,
 		liveWall,
 		wallPos: pos,
+		deadWall,
+		rinshankPos: 0,
 		doraIndicators,
 		players,
 		lastDiscard: null,
@@ -143,9 +145,13 @@ function openMeldsFor(player: PlayerState): TileCode[][] {
 	return player.melds.map((m) => m.tiles.map((t) => t.code));
 }
 
-export async function checkTsumo(state: GameState, seat: Seat): Promise<RoundResult | null> {
+export async function checkTsumo(
+	state: GameState,
+	seat: Seat,
+	afterKan = false
+): Promise<RoundResult | null> {
 	const player = state.players[seat];
-	const totalTiles = player.hand.length + player.melds.length * 3;
+	const totalTiles = player.hand.length + player.melds.reduce((s, m) => s + m.tiles.length, 0);
 	if (totalTiles !== 14) return null;
 
 	const result = await checkWin({
@@ -154,6 +160,7 @@ export async function checkTsumo(state: GameState, seat: Seat): Promise<RoundRes
 		doraIndicators: state.doraIndicators,
 		isRiichi: player.isRiichi,
 		isTsumo: true,
+		afterKan,
 		ronTileCode: null,
 		seatWind: getSeatWind(seat, state.dealer),
 		roundWind: getRoundWind()
@@ -278,6 +285,70 @@ function getChiOptions(
 	return options;
 }
 
+function getDaiminkanOption(hand: GameTile[], calledTile: GameTile): ClaimOption | null {
+	const matching = hand.filter((t) => t.code === calledTile.code);
+	if (matching.length >= 3) {
+		return { type: 'kan', handTiles: [matching[0], matching[1], matching[2]] };
+	}
+	return null;
+}
+
+function getAnkanOptions(player: PlayerState): TileCode[] {
+	const counts = new Map<TileCode, number>();
+	for (const t of player.hand) {
+		counts.set(t.code, (counts.get(t.code) ?? 0) + 1);
+	}
+	const result: TileCode[] = [];
+	for (const [code, count] of counts) {
+		if (count >= 4) result.push(code);
+	}
+	return result;
+}
+
+function getKakanOptions(player: PlayerState): { meldIndex: number; code: TileCode }[] {
+	const options: { meldIndex: number; code: TileCode }[] = [];
+	for (let i = 0; i < player.melds.length; i++) {
+		const meld = player.melds[i];
+		if (meld.type === 'pon') {
+			const code = meld.tiles[0].code;
+			if (player.hand.some((t) => t.code === code)) {
+				options.push({ meldIndex: i, code });
+			}
+		}
+	}
+	return options;
+}
+
+function drawRinshan(state: GameState, seat: Seat): GameState {
+	if (state.rinshankPos >= 4) {
+		return { ...state, phase: 'round_end', roundResult: null };
+	}
+
+	const tile = state.deadWall[state.rinshankPos];
+	const players = clonePlayers(state);
+	players[seat].hand = [...players[seat].hand, tile];
+
+	// Flip a new dora indicator after each kan
+	const newDoraIdx = 4 + state.doraIndicators.length;
+	const newDoraIndicators =
+		newDoraIdx < state.deadWall.length
+			? [...state.doraIndicators, state.deadWall[newDoraIdx]]
+			: state.doraIndicators;
+
+	return {
+		...state,
+		players,
+		rinshankPos: state.rinshankPos + 1,
+		doraIndicators: newDoraIndicators,
+		turnCount: state.turnCount + 1,
+		phase: seat === 0 ? 'player_discard' : 'ai_turn',
+		currentSeat: seat,
+		pendingTsumo: null,
+		pendingRon: null,
+		claimOptions: null
+	};
+}
+
 function getHumanClaimOptions(
 	state: GameState,
 	discardTile: GameTile,
@@ -285,6 +356,9 @@ function getHumanClaimOptions(
 ): ClaimOption[] {
 	const hand = state.players[0].hand;
 	const options: ClaimOption[] = [];
+
+	const kan = getDaiminkanOption(hand, discardTile);
+	if (kan) options.push(kan);
 
 	const pon = getPonOption(hand, discardTile);
 	if (pon) options.push(pon);
@@ -361,7 +435,7 @@ export async function humanDeclareRon(state: GameState): Promise<GameState> {
 	return applyRoundResult(state, ron);
 }
 
-export function humanClaimPon(state: GameState, handTiles: [GameTile, GameTile]): GameState {
+export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameState {
 	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
 
 	const calledTile = state.lastDiscard;
@@ -389,21 +463,15 @@ export function humanClaimPon(state: GameState, handTiles: [GameTile, GameTile])
 	};
 }
 
-export function humanClaimChi(state: GameState, handTiles: [GameTile, GameTile]): GameState {
+export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameState {
 	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
 
 	const calledTile = state.lastDiscard;
 	const player = state.players[0];
 
-	const chiTiles = sortHand([handTiles[0], handTiles[1], calledTile]) as [
-		GameTile,
-		GameTile,
-		GameTile
-	];
-
 	const meld: Meld = {
 		type: 'chi',
-		tiles: chiTiles,
+		tiles: sortHand([handTiles[0], handTiles[1], calledTile]),
 		calledFrom: state.lastDiscardSeat!
 	};
 
@@ -420,6 +488,90 @@ export function humanClaimChi(state: GameState, handTiles: [GameTile, GameTile])
 		currentSeat: 0,
 		pendingRon: null,
 		claimOptions: null
+	};
+}
+
+export async function humanDeclareAnkan(state: GameState, code: TileCode): Promise<GameState> {
+	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return state;
+
+	const player = state.players[0];
+	const matching = player.hand.filter((t) => t.code === code);
+	if (matching.length < 4) return state;
+
+	const players = clonePlayers(state);
+	players[0].hand = sortHand(player.hand.filter((t) => t.code !== code));
+	players[0].melds = [
+		...player.melds,
+		{ type: 'ankan', tiles: matching.slice(0, 4), calledFrom: null }
+	];
+
+	const drawn = drawRinshan({ ...state, players }, 0);
+	const tsumo = await checkTsumo(drawn, 0, true);
+	return { ...drawn, pendingTsumo: tsumo };
+}
+
+export async function humanDeclareKakan(state: GameState, meldIndex: number): Promise<GameState> {
+	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return state;
+
+	const player = state.players[0];
+	const meld = player.melds[meldIndex];
+	if (!meld || meld.type !== 'pon') return state;
+
+	const code = meld.tiles[0].code;
+	const addedTile = player.hand.find((t) => t.code === code);
+	if (!addedTile) return state;
+
+	// Chankan: AI opponents can ron the added tile
+	for (let s = 1; s < 4; s++) {
+		const ron = await checkRon(state, s as Seat, addedTile, 0);
+		if (ron) return applyRoundResult(state, ron);
+	}
+
+	const players = clonePlayers(state);
+	players[0].hand = sortHand(player.hand.filter((t) => t.id !== addedTile.id));
+	players[0].melds = player.melds.map((m, i) =>
+		i === meldIndex ? { ...m, type: 'kakan' as const, tiles: [...m.tiles, addedTile] } : m
+	);
+
+	const drawn = drawRinshan({ ...state, players }, 0);
+	const tsumo = await checkTsumo(drawn, 0, true);
+	return { ...drawn, pendingTsumo: tsumo };
+}
+
+export async function humanClaimDaiminkan(
+	state: GameState,
+	handTiles: GameTile[]
+): Promise<GameState> {
+	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
+
+	const calledTile = state.lastDiscard;
+	const player = state.players[0];
+
+	const meld: Meld = {
+		type: 'daiminkan',
+		tiles: [...handTiles, calledTile],
+		calledFrom: state.lastDiscardSeat!
+	};
+
+	const players = clonePlayers(state);
+	const handTileIds = new Set(handTiles.map((t) => t.id));
+	players[0].hand = sortHand(player.hand.filter((t) => !handTileIds.has(t.id)));
+	players[0].melds = [...player.melds, meld];
+
+	const postKan: GameState = { ...state, players, pendingRon: null, claimOptions: null };
+	const drawn = drawRinshan(postKan, 0);
+	const tsumo = await checkTsumo(drawn, 0, true);
+	return { ...drawn, pendingTsumo: tsumo };
+}
+
+export function getPlayerKanOptions(state: GameState): {
+	ankan: TileCode[];
+	kakan: { meldIndex: number; code: TileCode }[];
+} {
+	const player = state.players[0];
+	return {
+		ankan: getAnkanOptions(player),
+		kakan: getKakanOptions(player)
 	};
 }
 
@@ -453,6 +605,46 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 
 	const tsumo = await checkTsumo(s, seat);
 	if (tsumo) return applyRoundResult(s, tsumo);
+
+	// Good AI declares kan when possible
+	if (s.players[seat].difficulty === 'good') {
+		const ankanCodes = getAnkanOptions(s.players[seat]);
+		if (ankanCodes.length > 0) {
+			const code = ankanCodes[0];
+			const aiPlayer = s.players[seat];
+			const matching = aiPlayer.hand.filter((t) => t.code === code);
+			const players = clonePlayers(s);
+			players[seat].hand = sortHand(aiPlayer.hand.filter((t) => t.code !== code));
+			players[seat].melds = [
+				...aiPlayer.melds,
+				{ type: 'ankan' as const, tiles: matching.slice(0, 4), calledFrom: null }
+			];
+			s = drawRinshan({ ...s, players }, seat);
+			const kanTsumo = await checkTsumo(s, seat, true);
+			if (kanTsumo) return applyRoundResult(s, kanTsumo);
+		}
+
+		const kakanOpts = getKakanOptions(s.players[seat]);
+		if (kakanOpts.length > 0) {
+			const { meldIndex, code } = kakanOpts[0];
+			const aiPlayer = s.players[seat];
+			const addedTile = aiPlayer.hand.find((t) => t.code === code);
+			if (addedTile) {
+				// Chankan: check if human can ron the added tile
+				const humanRon = await checkRon(s, 0, addedTile, seat);
+				if (humanRon) return applyRoundResult(s, humanRon);
+
+				const players = clonePlayers(s);
+				players[seat].hand = sortHand(aiPlayer.hand.filter((t) => t.id !== addedTile.id));
+				players[seat].melds = aiPlayer.melds.map((m, i) =>
+					i === meldIndex ? { ...m, type: 'kakan' as const, tiles: [...m.tiles, addedTile] } : m
+				);
+				s = drawRinshan({ ...s, players }, seat);
+				const kanTsumo = await checkTsumo(s, seat, true);
+				if (kanTsumo) return applyRoundResult(s, kanTsumo);
+			}
+		}
+	}
 
 	if (shouldDeclareRiichi(seat, s)) {
 		const players = clonePlayers(s);

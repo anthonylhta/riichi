@@ -49,6 +49,7 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 
 function makeState(overrides: Partial<GameState> = {}): GameState {
 	const wall = Array.from({ length: 70 }, (_, i) => tile((i % 34) + 1, 200 + i));
+	const deadWall = Array.from({ length: 14 }, (_, i) => tile((i % 34) + 1, 300 + i));
 	return {
 		phase: 'player_discard',
 		round: 1,
@@ -58,6 +59,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		turnCount: 1,
 		liveWall: wall,
 		wallPos: 0,
+		deadWall,
+		rinshankPos: 0,
 		doraIndicators: [tile(1, 100)],
 		players: [makePlayer(0), makePlayer(1), makePlayer(2), makePlayer(3)] as [
 			PlayerState,
