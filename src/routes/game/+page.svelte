@@ -11,10 +11,14 @@
 		declareRon,
 		claimPon,
 		claimChi,
+		claimDaiminkan,
+		declareAnkan,
+		declareKakan,
 		passClaim
 	} from '$lib/stores/game';
 	import { tileLabel, suitClass } from '$lib/game/tiles';
 	import { isTenpaiAfterDiscard } from '$lib/game/ai';
+	import { getPlayerKanOptions } from '$lib/game/engine';
 
 	let selectedTileId = $state<number | null>(null);
 
@@ -58,6 +62,12 @@
 			devSetFuriten = m.devSetFuriten;
 		});
 	}
+
+	let kanOptions = $derived(
+		$gameState?.phase === 'player_discard' && $gameState.currentSeat === 0
+			? getPlayerKanOptions($gameState)
+			: { ankan: [], kakan: [] }
+	);
 
 	let seatNames = $derived(
 		$gameState
@@ -212,6 +222,16 @@
 								: ''}
 						</p>
 					{/if}
+					{#each kanOptions.ankan as code (code)}
+						<button class="action-btn kan-btn" onclick={() => declareAnkan(code)}>
+							Ankan 暗槓 ({tileLabel(code)}×4)
+						</button>
+					{/each}
+					{#each kanOptions.kakan as opt (opt.meldIndex)}
+						<button class="action-btn kan-btn" onclick={() => declareKakan(opt.meldIndex)}>
+							Kakan 加槓 ({tileLabel(opt.code)})
+						</button>
+					{/each}
 				{/if}
 			</div>
 		</div>
@@ -236,7 +256,11 @@
 							<button class="claim-btn btn-ron" onclick={declareRon}>Ron 栄和</button>
 						{/if}
 						{#each $gameState.claimOptions ?? [] as option, oi (oi)}
-							{#if option.type === 'pon'}
+							{#if option.type === 'kan'}
+								<button class="claim-btn btn-kan" onclick={() => claimDaiminkan(option.handTiles)}>
+									Kan 槓
+								</button>
+							{:else if option.type === 'pon'}
 								<button class="claim-btn btn-pon" onclick={() => claimPon(option.handTiles)}>
 									Pon ポン
 								</button>
@@ -617,6 +641,14 @@
 		background: #155f2d;
 	}
 
+	.kan-btn {
+		background: #4a2a80;
+	}
+
+	.kan-btn:hover {
+		background: #3a2060;
+	}
+
 	/* Claim card */
 	.claim-card {
 		background: #181818;
@@ -694,6 +726,12 @@
 	.chi-tiles {
 		font-size: 0.7rem;
 		opacity: 0.85;
+	}
+
+	.btn-kan {
+		background: #4a2a80;
+		color: #fff;
+		min-width: 80px;
 	}
 
 	.btn-pass {
