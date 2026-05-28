@@ -17,7 +17,7 @@ export interface PlayerState {
 export type GamePhase =
 	| 'dealing'
 	| 'player_discard' // waiting for human to click a tile
-	| 'ai_turn'        // AI moves, automated
+	| 'ai_turn' // AI moves, automated
 	| 'round_end'
 	| 'game_end';
 

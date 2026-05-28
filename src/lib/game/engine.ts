@@ -21,7 +21,7 @@ function makePlayer(seat: Seat): PlayerState {
 		isHuman: seat === 0,
 		difficulty: seat === 0 ? null : seat === 3 ? 'good' : 'basic',
 		isRiichi: false,
-		riichiTile: null,
+		riichiTile: null
 	};
 }
 
@@ -35,7 +35,10 @@ export function initGame(): GameState {
 
 	// Deal 13 tiles to each player
 	const players: [PlayerState, PlayerState, PlayerState, PlayerState] = [
-		makePlayer(0), makePlayer(1), makePlayer(2), makePlayer(3),
+		makePlayer(0),
+		makePlayer(1),
+		makePlayer(2),
+		makePlayer(3)
 	];
 
 	let pos = 0;
@@ -63,7 +66,7 @@ export function initGame(): GameState {
 		players,
 		lastDiscard: null,
 		lastDiscardSeat: null,
-		roundResult: null,
+		roundResult: null
 	};
 
 	// Dealer draws the 14th tile to start
@@ -86,7 +89,7 @@ function drawTile(state: GameState, seat: Seat): GameState {
 		wallPos: state.wallPos + 1,
 		turnCount: state.turnCount + 1,
 		phase: seat === 0 ? 'player_discard' : 'ai_turn',
-		currentSeat: seat,
+		currentSeat: seat
 	};
 
 	return newState;
@@ -105,7 +108,7 @@ export async function checkTsumo(state: GameState, seat: Seat): Promise<RoundRes
 		isTsumo: true,
 		ronTileCode: null,
 		seatWind: SEAT_WINDS[seat],
-		roundWind: getRoundWind(),
+		roundWind: getRoundWind()
 	});
 
 	if (!result.isWin) return null;
@@ -138,7 +141,7 @@ export async function checkTsumo(state: GameState, seat: Seat): Promise<RoundRes
 		han: result.han,
 		fu: result.fu,
 		score: result.score,
-		pointChanges,
+		pointChanges
 	};
 }
 
@@ -158,7 +161,7 @@ export async function checkRon(
 		isTsumo: false,
 		ronTileCode: discardTile.code,
 		seatWind: SEAT_WINDS[claimantSeat],
-		roundWind: getRoundWind(),
+		roundWind: getRoundWind()
 	});
 
 	if (!result.isWin) return null;
@@ -177,7 +180,7 @@ export async function checkRon(
 		han: result.han,
 		fu: result.fu,
 		score: result.score,
-		pointChanges,
+		pointChanges
 	};
 }
 
@@ -190,7 +193,7 @@ export function applyRoundResult(state: GameState, result: RoundResult): GameSta
 		...state,
 		players,
 		roundResult: result,
-		phase: 'round_end',
+		phase: 'round_end'
 	};
 }
 
@@ -217,13 +220,13 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 		players[0].score -= 1000;
 	}
 
-	let newState: GameState = {
+	const newState: GameState = {
 		...state,
 		players,
 		lastDiscard: tile,
 		lastDiscardSeat: 0,
 		phase: 'ai_turn',
-		currentSeat: 1,
+		currentSeat: 1
 	};
 
 	// Check if any AI can ron on this discard
@@ -270,7 +273,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		lastDiscard: discardTile,
 		lastDiscardSeat: seat,
 		currentSeat: nextSeat,
-		phase: nextSeat === 0 ? 'player_discard' : 'ai_turn',
+		phase: nextSeat === 0 ? 'player_discard' : 'ai_turn'
 	};
 
 	// Check if human can ron
@@ -323,6 +326,6 @@ function clonePlayers(state: GameState): [PlayerState, PlayerState, PlayerState,
 		PlayerState,
 		PlayerState,
 		PlayerState,
-		PlayerState,
+		PlayerState
 	];
 }

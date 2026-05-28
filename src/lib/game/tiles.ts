@@ -12,11 +12,40 @@ export interface GameTile {
 }
 
 export const TC = {
-	M1: 1, M2: 2, M3: 3, M4: 4, M5: 5, M6: 6, M7: 7, M8: 8, M9: 9,
-	P1: 10, P2: 11, P3: 12, P4: 13, P5: 14, P6: 15, P7: 16, P8: 17, P9: 18,
-	S1: 19, S2: 20, S3: 21, S4: 22, S5: 23, S6: 24, S7: 25, S8: 26, S9: 27,
-	EAST: 28, SOUTH: 29, WEST: 30, NORTH: 31,
-	HAKU: 32, HATSU: 33, CHUN: 34,
+	M1: 1,
+	M2: 2,
+	M3: 3,
+	M4: 4,
+	M5: 5,
+	M6: 6,
+	M7: 7,
+	M8: 8,
+	M9: 9,
+	P1: 10,
+	P2: 11,
+	P3: 12,
+	P4: 13,
+	P5: 14,
+	P6: 15,
+	P7: 16,
+	P8: 17,
+	P9: 18,
+	S1: 19,
+	S2: 20,
+	S3: 21,
+	S4: 22,
+	S5: 23,
+	S6: 24,
+	S7: 25,
+	S8: 26,
+	S9: 27,
+	EAST: 28,
+	SOUTH: 29,
+	WEST: 30,
+	NORTH: 31,
+	HAKU: 32,
+	HATSU: 33,
+	CHUN: 34
 } as const;
 
 export function getSuit(code: TileCode): 'man' | 'pin' | 'sou' | 'wind' | 'dragon' {
@@ -80,7 +109,12 @@ export function toEffStr(code: TileCode): string {
 
 // Convert hand of codes to mahjong-tile-efficiency 4-array format
 export function toEffHand(codes: TileCode[]): number[][] {
-	const h = [new Array(9).fill(0), new Array(9).fill(0), new Array(9).fill(0), new Array(7).fill(0)];
+	const h = [
+		new Array(9).fill(0),
+		new Array(9).fill(0),
+		new Array(9).fill(0),
+		new Array(7).fill(0)
+	];
 	for (const c of codes) {
 		if (c <= 9) h[0][c - 1]++;
 		else if (c <= 18) h[1][c - 10]++;

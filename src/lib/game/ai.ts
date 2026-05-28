@@ -1,4 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 import { RuleSet } from 'mahjong-tile-efficiency';
 import { toEffHand, toEffStr } from './tiles';
 import type { TileCode, GameTile } from './tiles';
@@ -19,7 +18,7 @@ function calcShantenAndUkeire(codes: TileCode[]): { shanten: number; ukeire: num
 		const result: any = riichiRuleSet.calUkeire(toEffHand(codes) as any);
 		return {
 			shanten: result.shanten ?? 8,
-			ukeire: result.totalUkeire ?? 0,
+			ukeire: result.totalUkeire ?? 0
 		};
 	} catch {
 		return { shanten: 8, ukeire: 0 };
@@ -109,6 +108,6 @@ export function getDiscardHints(hand: GameTile[]): { tileId: number; label: stri
 	const ranked = rankDiscards(hand);
 	return ranked.slice(0, 3).map((opt) => ({
 		tileId: opt.tile.id,
-		label: toEffStr(opt.tile.code),
+		label: toEffStr(opt.tile.code)
 	}));
 }

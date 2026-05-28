@@ -1,6 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { gameState, gameLoading, gameError, startGame, discard, declareRon, canRon } from '$lib/stores/game';
+	import {
+		gameState,
+		gameLoading,
+		gameError,
+		startGame,
+		discard,
+		declareRon,
+		canRon
+	} from '$lib/stores/game';
 	import { tileLabel, suitClass } from '$lib/game/tiles';
 
 	let selectedTileId: number | null = null;
@@ -20,10 +28,6 @@
 		await declareRon();
 	}
 
-	async function handleNewGame() {
-		await startGame();
-	}
-
 	const SEAT_NAMES = ['You (East)', 'South', 'West', 'North'];
 	const ROUND_NAMES = ['East 1', 'East 2', 'East 3', 'East 4'];
 </script>
@@ -35,7 +39,7 @@
 		<div class="error-screen">
 			<p>Something went wrong starting the game.</p>
 			<pre>{$gameError}</pre>
-			<button class="action-btn" on:click={startGame}>Retry</button>
+			<button class="action-btn" onclick={startGame}>Retry</button>
 		</div>
 	{:else if $gameState}
 		<!-- Header -->
@@ -49,7 +53,7 @@
 
 		<!-- Opponent info row -->
 		<div class="opponents">
-			{#each [1, 2, 3] as seat}
+			{#each [1, 2, 3] as seat (seat)}
 				<div class="opponent-panel" class:riichi={$gameState.players[seat].isRiichi}>
 					<div class="opponent-name">
 						{SEAT_NAMES[seat]}
@@ -57,12 +61,12 @@
 					</div>
 					<div class="opponent-score">{$gameState.players[seat].score.toLocaleString()}</div>
 					<div class="opponent-tiles">
-						{#each $gameState.players[seat].hand as _}
-							<div class="tile tile-back"></div>
+						{#each $gameState.players[seat].hand as tile (tile.id)}
+							<div class="tile tile-back" data-id={tile.id}></div>
 						{/each}
 					</div>
 					<div class="discard-row">
-						{#each $gameState.players[seat].discards as tile}
+						{#each $gameState.players[seat].discards as tile (tile.id)}
 							<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
 						{/each}
 					</div>
@@ -73,7 +77,7 @@
 		<!-- Dora indicator -->
 		<div class="dora-row">
 			<span class="dora-label">Dora indicator:</span>
-			{#each $gameState.doraIndicators as tile}
+			{#each $gameState.doraIndicators as tile (tile.id)}
 				<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
 			{/each}
 		</div>
@@ -89,19 +93,19 @@
 			</div>
 
 			<div class="player-discards">
-				{#each $gameState.players[0].discards as tile}
+				{#each $gameState.players[0].discards as tile (tile.id)}
 					<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
 				{/each}
 			</div>
 
 			<div class="player-hand">
-				{#each $gameState.players[0].hand as tile}
+				{#each $gameState.players[0].hand as tile (tile.id)}
 					<button
 						class="tile tile-large tile-{suitClass(tile.code)}"
 						class:selected={selectedTileId === tile.id}
 						class:clickable={$gameState.phase === 'player_discard'}
 						disabled={$gameState.phase !== 'player_discard'}
-						on:click={() => handleTileClick(tile.id)}
+						onclick={() => handleTileClick(tile.id)}
 					>
 						{tileLabel(tile.code)}
 					</button>
@@ -113,7 +117,7 @@
 			{/if}
 
 			{#if canRon()}
-				<button class="action-btn ron-btn" on:click={handleRon}>Ron 栄和</button>
+				<button class="action-btn ron-btn" onclick={handleRon}>Ron 栄和</button>
 			{/if}
 		</div>
 
@@ -133,7 +137,7 @@
 							{$gameState.roundResult.score.toLocaleString()} pts
 						</p>
 						<div class="score-changes">
-							{#each $gameState.roundResult.pointChanges as change, i}
+							{#each $gameState.roundResult.pointChanges as change, i (i)}
 								<div class="score-row" class:winner={$gameState.roundResult.winner === i}>
 									<span>{SEAT_NAMES[i]}</span>
 									<span class:positive={change > 0} class:negative={change < 0}>
@@ -146,7 +150,7 @@
 						<div class="win-announcement">流局</div>
 						<p class="winner-name">Draw — wall exhausted</p>
 					{/if}
-					<button class="action-btn" on:click={startGame}>New Game</button>
+					<button class="action-btn" onclick={startGame}>New Game</button>
 				</div>
 			</div>
 		{/if}
@@ -316,7 +320,9 @@
 		border-radius: 4px;
 		font-weight: 600;
 		user-select: none;
-		transition: transform 0.1s, border-color 0.1s;
+		transition:
+			transform 0.1s,
+			border-color 0.1s;
 	}
 
 	.tile-back {
@@ -354,12 +360,24 @@
 	}
 
 	/* Suit colours */
-	.tile-man { color: #e05050; }
-	.tile-pin { color: #4a9eff; }
-	.tile-sou { color: #4caf50; }
-	.tile-wind { color: #ccc; }
-	.tile-dragon { color: #e8d080; }
-	.tile-dragon-chun { color: #c41e3a; }
+	.tile-man {
+		color: #e05050;
+	}
+	.tile-pin {
+		color: #4a9eff;
+	}
+	.tile-sou {
+		color: #4caf50;
+	}
+	.tile-wind {
+		color: #ccc;
+	}
+	.tile-dragon {
+		color: #e8d080;
+	}
+	.tile-dragon-chun {
+		color: #c41e3a;
+	}
 
 	.action-hint {
 		font-size: 0.8rem;
@@ -445,8 +463,12 @@
 		font-weight: 600;
 	}
 
-	.positive { color: #4caf50; }
-	.negative { color: #c41e3a; }
+	.positive {
+		color: #4caf50;
+	}
+	.negative {
+		color: #c41e3a;
+	}
 
 	.error-screen {
 		display: flex;
