@@ -1,4 +1,5 @@
-import { tilesToHand, RuleSet } from 'mahjong-tile-efficiency';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import { RuleSet } from 'mahjong-tile-efficiency';
 import { toEffHand, toEffStr } from './tiles';
 import type { TileCode, GameTile } from './tiles';
 import type { GameState, Seat } from './types';
@@ -9,14 +10,15 @@ interface DiscardOption {
 	ukeire: number;
 }
 
-const riichiRuleSet = new RuleSet('Riichi');
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const riichiRuleSet: any = new RuleSet('Riichi');
 
 function calcShantenAndUkeire(codes: TileCode[]): { shanten: number; ukeire: number } {
 	try {
-		const hand = toEffHand(codes);
-		const result = riichiRuleSet.calUkeire(hand);
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const result: any = riichiRuleSet.calUkeire(toEffHand(codes) as any);
 		return {
-			shanten: result.shanten,
+			shanten: result.shanten ?? 8,
 			ukeire: result.totalUkeire ?? 0,
 		};
 	} catch {

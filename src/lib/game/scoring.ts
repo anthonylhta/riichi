@@ -44,7 +44,8 @@ export async function checkWin(input: WinCheckInput): Promise<WinResult> {
 
 		const actualDora = input.doraIndicators.map((t) => doraFromIndicator(t.code));
 
-		const result = calc({
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const result: any = (calc as any)({
 			closed_part: input.handCodes,
 			open_part: [],
 			options: {

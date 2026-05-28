@@ -21,8 +21,7 @@
 	}
 
 	async function handleNewGame() {
-		loading = true;
-		await game.startGame();
+		await startGame();
 	}
 
 	const SEAT_NAMES = ['You (East)', 'South', 'West', 'North'];
