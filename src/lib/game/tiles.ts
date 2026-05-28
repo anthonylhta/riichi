@@ -136,9 +136,13 @@ export function doraFromIndicator(indicator: TileCode): TileCode {
 export function createWall(): GameTile[] {
 	const tiles: GameTile[] = [];
 	let id = 0;
+	// One red five (aka dora) per number suit — the conventional 3-red ruleset.
+	// The first copy of each 5 (5m/5p/5s) is the red one.
+	const redFiveCodes = new Set<TileCode>([TC.M5, TC.P5, TC.S5]);
 	for (let code = 1; code <= 34; code++) {
 		for (let i = 0; i < 4; i++) {
-			tiles.push({ code, id: id++, isRed: false });
+			const isRed = i === 0 && redFiveCodes.has(code);
+			tiles.push({ code, id: id++, isRed });
 		}
 	}
 	return tiles;

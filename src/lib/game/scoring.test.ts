@@ -311,6 +311,44 @@ describe('checkWin — dora and ura dora', () => {
 	});
 });
 
+describe('checkWin — aka dora (red fives)', () => {
+	// Same tanyao + pinfu base (2 han); akaCount is passed by the engine, computed
+	// from how many isRed tiles are in the winning hand.
+	const tanyaoHand = {
+		handCodes: [
+			TC.M2,
+			TC.M3,
+			TC.M4,
+			TC.M5,
+			TC.M6,
+			TC.M7,
+			TC.P2,
+			TC.P3,
+			TC.P4,
+			TC.S6,
+			TC.S7,
+			TC.S5,
+			TC.S5
+		],
+		ronTileCode: TC.S8 as TileCode
+	};
+
+	it('does not count aka dora when akaCount is 0', async () => {
+		const res = await win({ ...tanyaoHand });
+		expect(res.han).toBe(2);
+		expect(res.yakuNames).not.toContain('Aka Dora');
+	});
+
+	it('counts each red five as +1 han, labeled separately from Dora', async () => {
+		const res = await win({ ...tanyaoHand, akaCount: 2 });
+		expect(res.isWin).toBe(true);
+		expect(res.han).toBe(4); // tanyao + pinfu + 2 aka
+		// Unlike ura dora, aka_count is a dedicated riichi-rs input, so it IS labeled
+		// separately as "Aka Dora" (contrast the ura-dora test above).
+		expect(res.yakuNames).toContain('Aka Dora');
+	});
+});
+
 describe('checkWin — non-wins', () => {
 	it('returns isWin:false for an incomplete hand', async () => {
 		const res = await win({
