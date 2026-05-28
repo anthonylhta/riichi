@@ -64,6 +64,7 @@ export interface GameState {
 	uraDoraIndicators: GameTile[]; // revealed only on riichi wins; mirrors doraIndicators count
 
 	anyCallMadeThisRound: boolean; // pon/chi/kan made; cancels ippatsu + disqualifies chihou/tenhou
+	riichiBets: number; // count of 1000pt sticks on the table; awarded to the next winner
 
 	players: [PlayerState, PlayerState, PlayerState, PlayerState];
 
