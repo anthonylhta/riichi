@@ -435,6 +435,129 @@ function getHumanClaimOptions(
 	return options;
 }
 
+// ── AI Call Decisions ──────────────────────────────────────────────────────────
+
+function aiPonHandTiles(hand: GameTile[], calledTile: GameTile): [GameTile, GameTile] | null {
+	if (getShanten(hand.map((t) => t.code)) === 0) return null;
+	const matching = hand.filter((t) => t.code === calledTile.code);
+	if (matching.length < 2) return null;
+	return [matching[0], matching[1]];
+}
+
+function aiDaiminkanHandTiles(
+	hand: GameTile[],
+	calledTile: GameTile
+): [GameTile, GameTile, GameTile] | null {
+	if (getShanten(hand.map((t) => t.code)) === 0) return null;
+	const matching = hand.filter((t) => t.code === calledTile.code);
+	if (matching.length < 3) return null;
+	return [matching[0], matching[1], matching[2]];
+}
+
+function aiChiHandTiles(
+	hand: GameTile[],
+	calledTile: GameTile,
+	discarderSeat: Seat,
+	chiSeat: Seat
+): [GameTile, GameTile] | null {
+	const opts = getChiOptions(hand, calledTile, discarderSeat, chiSeat);
+	if (opts.length === 0) return null;
+	const currentShanten = getShanten(hand.map((t) => t.code));
+	if (currentShanten === 0) return null;
+
+	let best: [GameTile, GameTile] | null = null;
+	let bestShanten = currentShanten;
+	for (const opt of opts) {
+		const [tA, tB] = opt.handTiles;
+		const remaining = hand.filter((t) => t.id !== tA.id && t.id !== tB.id);
+		let minSh = 8;
+		for (const t of remaining) {
+			const sh = getShanten(remaining.filter((r) => r.id !== t.id).map((r) => r.code));
+			if (sh < minSh) minSh = sh;
+		}
+		if (minSh < bestShanten) {
+			bestShanten = minSh;
+			best = [tA, tB];
+		}
+	}
+	return best;
+}
+
+async function applyAiCalls(
+	state: GameState,
+	discardTile: GameTile,
+	discarderSeat: Seat
+): Promise<GameState> {
+	// Check pon/daiminkan in turn order from discarder (closest seat wins)
+	for (let offset = 1; offset <= 3; offset++) {
+		const seat = ((discarderSeat + offset) % 4) as Seat;
+		const player = state.players[seat];
+		if (player.isHuman || player.isRiichi) continue;
+
+		const daiminkanTiles = aiDaiminkanHandTiles(player.hand, discardTile);
+		if (daiminkanTiles) {
+			const meld: Meld = {
+				type: 'daiminkan',
+				tiles: [...daiminkanTiles, discardTile],
+				calledFrom: discarderSeat
+			};
+			const players = clonePlayers(state);
+			const ids = new Set(daiminkanTiles.map((t) => t.id));
+			players[seat].hand = sortHand(player.hand.filter((t) => !ids.has(t.id)));
+			players[seat].melds = [...player.melds, meld];
+			for (const p of players) p.isIppatsu = false;
+			const postKan = { ...state, players, anyCallMadeThisRound: true };
+			const drawn = drawRinshan(postKan, seat);
+			return { ...drawn, phase: 'ai_turn', currentSeat: seat };
+		}
+
+		const ponTiles = aiPonHandTiles(player.hand, discardTile);
+		if (ponTiles) {
+			const meld: Meld = {
+				type: 'pon',
+				tiles: [ponTiles[0], ponTiles[1], discardTile],
+				calledFrom: discarderSeat
+			};
+			const players = clonePlayers(state);
+			players[seat].hand = sortHand(
+				player.hand.filter((t) => t.id !== ponTiles[0].id && t.id !== ponTiles[1].id)
+			);
+			players[seat].melds = [...player.melds, meld];
+			for (const p of players) p.isIppatsu = false;
+			return { ...state, players, anyCallMadeThisRound: true, phase: 'ai_turn', currentSeat: seat };
+		}
+	}
+
+	// Check chi (only from the seat immediately after discarder)
+	const chiSeat = ((discarderSeat + 1) % 4) as Seat;
+	const chiPlayer = state.players[chiSeat];
+	if (!chiPlayer.isHuman && !chiPlayer.isRiichi) {
+		const chiTiles = aiChiHandTiles(chiPlayer.hand, discardTile, discarderSeat, chiSeat);
+		if (chiTiles) {
+			const meld: Meld = {
+				type: 'chi',
+				tiles: sortHand([chiTiles[0], chiTiles[1], discardTile]),
+				calledFrom: discarderSeat
+			};
+			const players = clonePlayers(state);
+			players[chiSeat].hand = sortHand(
+				chiPlayer.hand.filter((t) => t.id !== chiTiles[0].id && t.id !== chiTiles[1].id)
+			);
+			players[chiSeat].melds = [...chiPlayer.melds, meld];
+			for (const p of players) p.isIppatsu = false;
+			return {
+				...state,
+				players,
+				anyCallMadeThisRound: true,
+				phase: 'ai_turn',
+				currentSeat: chiSeat
+			};
+		}
+	}
+
+	return state;
+}
+
 export async function humanDiscard(state: GameState, tileId: number): Promise<GameState> {
 	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return state;
 
@@ -492,7 +615,7 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 		if (ron) return applyRoundResult(newState, ron);
 	}
 
-	return newState;
+	return applyAiCalls(newState, tile, 0);
 }
 
 export async function humanDeclareTsumo(state: GameState): Promise<GameState> {
@@ -673,13 +796,21 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	const seat = state.currentSeat as Seat;
 	if (state.players[seat].isHuman) return state;
 
-	let s = drawTile(state, seat);
+	// After a pon/chi call the AI already holds the extra tile — skip draw and combat yaku checks
+	const preDraw = state.players[seat];
+	const totalTiles =
+		preDraw.hand.length + preDraw.melds.reduce((acc, m) => acc + m.tiles.length, 0);
+	const isPostCall = totalTiles >= 14;
 
-	const tsumo = await checkTsumo(s, seat);
-	if (tsumo) return applyRoundResult(s, tsumo);
+	let s = isPostCall ? state : drawTile(state, seat);
 
-	// Good AI declares kan when possible
-	if (s.players[seat].difficulty === 'good') {
+	if (!isPostCall) {
+		const tsumo = await checkTsumo(s, seat);
+		if (tsumo) return applyRoundResult(s, tsumo);
+	}
+
+	// Good AI declares kan when possible (normal turns only)
+	if (!isPostCall && s.players[seat].difficulty === 'good') {
 		const ankanCodes = getAnkanOptions(s.players[seat]);
 		if (ankanCodes.length > 0) {
 			const code = ankanCodes[0];
@@ -720,7 +851,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		}
 	}
 
-	if (shouldDeclareRiichi(seat, s)) {
+	if (!isPostCall && shouldDeclareRiichi(seat, s)) {
 		const players = clonePlayers(s);
 		players[seat].isRiichi = true;
 		players[seat].isIppatsu = true;
@@ -771,6 +902,10 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		const ron = await checkRon(s, claimant as Seat, discardTile, seat);
 		if (ron) return applyRoundResult(s, ron);
 	}
+
+	// Check AI pon/chi/daiminkan
+	const afterAiCalls = await applyAiCalls(s, discardTile, seat);
+	if (afterAiCalls !== s) return afterAiCalls;
 
 	// Draw for player if their turn is next
 	if (nextSeat === 0) {
