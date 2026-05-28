@@ -12,6 +12,9 @@ const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 
 export default defineConfig(
 	includeIgnoreFile(gitignorePath),
+	// .claude/ holds local tooling (hook scripts, settings) — git-ignored and absent in CI.
+	// Ignore it so local `eslint .` matches CI and doesn't lint the hook scripts.
+	{ ignores: ['.claude/'] },
 	js.configs.recommended,
 	ts.configs.recommended,
 	svelte.configs.recommended,
