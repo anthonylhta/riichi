@@ -5,6 +5,7 @@
 		gameLoading,
 		gameError,
 		startGame,
+		nextRound,
 		discard,
 		declareRon,
 		canRon
@@ -150,6 +151,27 @@
 						<div class="win-announcement">流局</div>
 						<p class="winner-name">Draw — wall exhausted</p>
 					{/if}
+					<button class="action-btn" onclick={nextRound}>Next Round</button>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Game end overlay -->
+		{#if $gameState.phase === 'game_end'}
+			<div class="overlay">
+				<div class="result-card">
+					<div class="win-announcement">終了</div>
+					<p class="winner-name">Game Over</p>
+					<div class="score-changes">
+						{#each [...$gameState.players]
+							.map((p, i) => ({ ...p, seat: i }))
+							.sort((a, b) => b.score - a.score) as player, rank (player.seat)}
+							<div class="score-row" class:winner={rank === 0}>
+								<span>#{rank + 1} {SEAT_NAMES[player.seat]}</span>
+								<span>{player.score.toLocaleString()}</span>
+							</div>
+						{/each}
+					</div>
 					<button class="action-btn" onclick={startGame}>New Game</button>
 				</div>
 			</div>

@@ -25,21 +25,28 @@ function makePlayer(seat: Seat): PlayerState {
 	};
 }
 
-export function initGame(): GameState {
+function initRound(
+	scores: [number, number, number, number],
+	dealer: Seat,
+	round: number,
+	honba: number
+): GameState {
 	const shuffled = shuffleTiles(createWall());
 
-	// Last 14 tiles = dead wall; dora indicator is dead wall index 4
 	const liveWall = shuffled.slice(0, 122);
 	const deadWall = shuffled.slice(122);
 	const doraIndicators = [deadWall[4]];
 
-	// Deal 13 tiles to each player
 	const players: [PlayerState, PlayerState, PlayerState, PlayerState] = [
 		makePlayer(0),
 		makePlayer(1),
 		makePlayer(2),
 		makePlayer(3)
 	];
+
+	for (let i = 0; i < 4; i++) {
+		players[i].score = scores[i];
+	}
 
 	let pos = 0;
 	for (let i = 0; i < 13; i++) {
@@ -48,17 +55,16 @@ export function initGame(): GameState {
 		}
 	}
 
-	// Sort each hand
 	for (const p of players) {
 		p.hand = sortHand(p.hand);
 	}
 
 	const state: GameState = {
 		phase: 'dealing',
-		round: 1,
-		honba: 0,
-		dealer: 0,
-		currentSeat: 0,
+		round,
+		honba,
+		dealer,
+		currentSeat: dealer,
 		turnCount: 0,
 		liveWall,
 		wallPos: pos,
@@ -69,8 +75,41 @@ export function initGame(): GameState {
 		roundResult: null
 	};
 
-	// Dealer draws the 14th tile to start
-	return drawTile(state, 0);
+	return drawTile(state, dealer);
+}
+
+export function initGame(): GameState {
+	return initRound([25000, 25000, 25000, 25000], 0, 1, 0);
+}
+
+export function continueGame(state: GameState): GameState {
+	if (state.phase !== 'round_end') return state;
+
+	const result = state.roundResult;
+	let nextDealer = state.dealer;
+	let nextHonba = state.honba;
+	let nextRound = state.round;
+
+	if (result === null) {
+		// Draw — dealer stays, honba +1
+		nextHonba++;
+	} else if (result.winner === state.dealer) {
+		// Dealer win — stays as dealer, honba +1
+		nextHonba++;
+	} else {
+		// Non-dealer win — rotate dealer, reset honba, advance round
+		nextDealer = ((state.dealer + 1) % 4) as Seat;
+		nextHonba = 0;
+		nextRound++;
+	}
+
+	const bust = state.players.some((p) => p.score <= 0);
+	if (nextRound > 4 || bust) {
+		return { ...state, phase: 'game_end' };
+	}
+
+	const scores = state.players.map((p) => p.score) as [number, number, number, number];
+	return initRound(scores, nextDealer, nextRound, nextHonba);
 }
 
 function drawTile(state: GameState, seat: Seat): GameState {
@@ -273,13 +312,13 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		lastDiscard: discardTile,
 		lastDiscardSeat: seat,
 		currentSeat: nextSeat,
-		phase: nextSeat === 0 ? 'player_discard' : 'ai_turn'
+		phase: 'ai_turn'
 	};
 
-	// Check if human can ron
+	// Check if human can ron on this discard
 	const humanRon = await checkRon(s, 0, discardTile, seat);
 	if (humanRon) {
-		// Don't auto-win for human — let UI present the option
+		// Don't auto-win — let UI present the option
 		return { ...s, phase: 'player_discard' };
 	}
 
@@ -289,6 +328,11 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		if (state.players[claimant].isHuman) continue;
 		const ron = await checkRon(s, claimant as Seat, discardTile, seat);
 		if (ron) return applyRoundResult(s, ron);
+	}
+
+	// No ron — draw tile for player if it's their turn next
+	if (nextSeat === 0) {
+		return drawTile(s, 0);
 	}
 
 	return s;

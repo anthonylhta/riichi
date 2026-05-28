@@ -1,6 +1,13 @@
 import { writable, get } from 'svelte/store';
 import type { GameState } from '$lib/game/types';
-import { initGame, humanDiscard, humanDeclareRon, stepAiTurn, canHumanRon } from '$lib/game/engine';
+import {
+	initGame,
+	continueGame,
+	humanDiscard,
+	humanDeclareRon,
+	stepAiTurn,
+	canHumanRon
+} from '$lib/game/engine';
 
 export const gameState = writable<GameState | null>(null);
 export const gameLoading = writable(false);
@@ -60,6 +67,20 @@ export async function declareRon() {
 		gameState.set(next);
 	} catch (e) {
 		console.error('declareRon failed:', e);
+	}
+}
+
+export async function nextRound() {
+	const current = get(gameState);
+	if (!current) return;
+	try {
+		const next = continueGame(current);
+		gameState.set(next);
+		if (next.phase === 'ai_turn') {
+			await runUntilPlayerTurn(next);
+		}
+	} catch (e) {
+		console.error('nextRound failed:', e);
 	}
 }
 
