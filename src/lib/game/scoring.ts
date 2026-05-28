@@ -3,12 +3,13 @@ import { doraFromIndicator } from './tiles';
 import type { GameTile } from './tiles';
 
 interface WinCheckInput {
-	handCodes: TileCode[]; // 14 tiles including winning tile (last)
+	handCodes: TileCode[]; // closed tiles (14 for closed hand, fewer with melds)
+	openMelds: TileCode[][];
 	doraIndicators: GameTile[];
 	isRiichi: boolean;
 	isTsumo: boolean;
-	ronTileCode: TileCode | null; // null = tsumo
-	seatWind: TileCode; // TC.EAST etc
+	ronTileCode: TileCode | null;
+	seatWind: TileCode;
 	roundWind: TileCode;
 }
 
@@ -75,7 +76,7 @@ export async function checkWin(input: WinCheckInput): Promise<WinResult> {
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const result: any = (calc as any)({
 			closed_part: input.handCodes,
-			open_part: [],
+			open_part: input.openMelds,
 			options: {
 				dora: actualDora,
 				aka_count: 0,

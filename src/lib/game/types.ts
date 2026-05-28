@@ -3,10 +3,22 @@ import type { GameTile } from './tiles';
 export type Seat = 0 | 1 | 2 | 3;
 export type AiDifficulty = 'basic' | 'good';
 
+export interface Meld {
+	type: 'pon' | 'chi';
+	tiles: [GameTile, GameTile, GameTile];
+	calledFrom: Seat;
+}
+
+export interface ClaimOption {
+	type: 'pon' | 'chi';
+	handTiles: [GameTile, GameTile];
+}
+
 export interface PlayerState {
 	seat: Seat;
-	hand: GameTile[]; // 13 tiles at rest, 14 after drawing
+	hand: GameTile[];
 	discards: GameTile[];
+	melds: Meld[];
 	score: number;
 	isHuman: boolean;
 	difficulty: AiDifficulty | null;
@@ -16,24 +28,25 @@ export interface PlayerState {
 
 export type GamePhase =
 	| 'dealing'
-	| 'player_discard' // waiting for human to click a tile
-	| 'ai_turn' // AI moves, automated
+	| 'player_discard' // waiting for human to discard
+	| 'claim_decision' // waiting for human to ron/pon/chi/pass
+	| 'ai_turn'
 	| 'round_end'
 	| 'game_end';
 
 export interface RoundResult {
 	winner: Seat;
 	winType: 'tsumo' | 'ron';
-	loser: Seat | null; // null = tsumo
+	loser: Seat | null;
 	han: number;
 	fu: number;
-	score: number; // total points transferred
+	score: number;
 	pointChanges: [number, number, number, number];
 }
 
 export interface GameState {
 	phase: GamePhase;
-	round: number; // 1-4 (East 1-4)
+	round: number;
 	honba: number;
 	dealer: Seat;
 	currentSeat: Seat;
@@ -47,6 +60,10 @@ export interface GameState {
 
 	lastDiscard: GameTile | null;
 	lastDiscardSeat: Seat | null;
+
+	pendingTsumo: RoundResult | null; // non-null when player can tsumo
+	pendingRon: RoundResult | null; // non-null during claim_decision
+	claimOptions: ClaimOption[] | null; // pon/chi options during claim_decision
 
 	roundResult: RoundResult | null;
 }
