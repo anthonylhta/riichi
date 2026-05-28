@@ -2,9 +2,12 @@ import type { TileCode } from './tiles';
 import { doraFromIndicator } from './tiles';
 import type { GameTile } from './tiles';
 
+// riichi-rs-bundlers Meld format: [isOpen, tiles]
+type RiichiMeld = [boolean, TileCode[]];
+
 interface WinCheckInput {
 	handCodes: TileCode[]; // closed tiles (14 for closed hand, fewer with melds)
-	openMelds: TileCode[][];
+	openMelds: RiichiMeld[];
 	doraIndicators: GameTile[];
 	isRiichi: boolean;
 	isTsumo: boolean;
@@ -22,50 +25,64 @@ export interface WinResult {
 	yakuNames: string[];
 }
 
-// Yaku ID to display name mapping (subset of common yaku)
+// Yaku IDs from riichi-rs-bundlers type definitions
 const YAKU_NAMES: Record<string, string> = {
-	'0': 'Riichi',
-	'1': 'Ippeiko',
-	'2': 'Tanyao',
-	'3': 'Pinfu',
-	'4': 'Menzen Tsumo',
-	'5': 'Iipeiko',
-	'6': 'Chanta',
-	'7': 'Chiitoi',
-	'8': 'Toitoi',
-	'9': 'Sanankou',
-	'10': 'San Kantsu',
-	'11': 'Shousangen',
-	'12': 'Honitsu',
-	'13': 'Junchan',
-	'14': 'Ryanpeiko',
-	'15': 'Chinitsu',
-	'16': 'Kokushi',
-	'17': 'Suuankou',
-	'18': 'Daisangen',
-	'19': 'Shousuushii',
-	'20': 'Daisuushii',
-	'21': 'Tsuuiisou',
-	'22': 'Chinroutou',
-	'23': 'Ryuuiisou',
-	'24': 'Chuuren',
-	'25': 'Suukantsu',
-	'26': 'Tenhou',
-	'27': 'Chiihou',
-	'28': 'Haku',
-	'29': 'Hatsu',
-	'30': 'Chun',
-	'31': 'East',
-	'32': 'South',
-	'33': 'West',
-	'34': 'North',
-	'35': 'Double Riichi',
-	'36': 'Ippatsu',
-	'37': 'Haitei',
-	'38': 'Houtei',
-	'39': 'Rinshan',
-	'40': 'Chankan',
-	'53': 'Dora'
+	'0': 'Kokushi (13-sided)',
+	'1': 'Kokushi',
+	'2': 'Chuuren (9-sided)',
+	'3': 'Chuuren Poutou',
+	'4': 'Suuankou Tanki',
+	'5': 'Suuankou',
+	'6': 'Daisuushi',
+	'7': 'Shousuushii',
+	'8': 'Daisangen',
+	'9': 'Tsuuiisou',
+	'10': 'Ryuuiisou',
+	'11': 'Chinroutou',
+	'12': 'Suukantsu',
+	'13': 'Tenhou',
+	'14': 'Chiihou',
+	'15': 'Renhou',
+	'16': 'Daisharin',
+	'17': 'Chinitsu',
+	'18': 'Honitsu',
+	'19': 'Ryanpeikou',
+	'20': 'Junchan',
+	'21': 'Chanta',
+	'22': 'Toitoi',
+	'23': 'Honroutou',
+	'24': 'Sankantsu',
+	'25': 'Shousangen',
+	'26': 'Sanshoku Doukou',
+	'27': 'Sanankou',
+	'28': 'Chiitoitsu',
+	'29': 'Double Riichi',
+	'30': 'Ittsu',
+	'31': 'Sanshoku',
+	'32': 'Tanyao',
+	'33': 'Pinfu',
+	'34': 'Iipeiko',
+	'35': 'Menzen Tsumo',
+	'36': 'Riichi',
+	'37': 'Ippatsu',
+	'38': 'Rinshan',
+	'39': 'Chankan',
+	'40': 'Haitei',
+	'41': 'Houtei',
+	'42': 'Round Wind (East)',
+	'43': 'Round Wind (South)',
+	'44': 'Round Wind (West)',
+	'45': 'Round Wind (North)',
+	'46': 'Seat Wind (East)',
+	'47': 'Seat Wind (South)',
+	'48': 'Seat Wind (West)',
+	'49': 'Seat Wind (North)',
+	'50': 'Haku',
+	'51': 'Hatsu',
+	'52': 'Chun',
+	'53': 'Dora',
+	'54': 'Ura Dora',
+	'55': 'Aka Dora'
 };
 
 export async function checkWin(input: WinCheckInput): Promise<WinResult> {

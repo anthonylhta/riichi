@@ -141,8 +141,8 @@ function drawTile(state: GameState, seat: Seat): GameState {
 	};
 }
 
-function openMeldsFor(player: PlayerState): TileCode[][] {
-	return player.melds.map((m) => m.tiles.map((t) => t.code));
+function openMeldsFor(player: PlayerState): [boolean, TileCode[]][] {
+	return player.melds.map((m) => [m.type !== 'ankan', m.tiles.map((t) => t.code)]);
 }
 
 export async function checkTsumo(
