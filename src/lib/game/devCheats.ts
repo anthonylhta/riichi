@@ -165,6 +165,71 @@ export async function devSetDaiminkan() {
 	);
 }
 
+// Full ron flow: player has a tenpai-able 14-tile hand, discards the junk tile (9s, shown
+// gold by riichi-trigger highlight), auto-declares riichi, then seat 1 draws and discards
+// 9m (the winning tile). Ron overlay appears — click to end the round.
+//
+// Player hand: 123m 456m 78m 123p 99p + 9s(junk) — discard 9s → tenpai waiting 6m or 9m
+// Seat 1 hand: 123p 456p 789p 11s 23s — draws 9m from wall, discards it (best ukeire without it)
+export async function devSetTenpaiToRon() {
+	const state = get(gameState);
+	if (!state) return;
+
+	// Player: 14 tiles. Discard 9s(27) → 123m+456m+78m+123p+99p, tenpai on 6m(6) or 9m(9)
+	const playerHand = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 18, 18, 27].map(dt);
+
+	// Seat 1: 13 tiles. Tenpai on 1s/4s — completely ignores man tiles.
+	// After drawing 9m, chooseDiscard picks 9m (ukeire 7 vs 3 for alternatives).
+	const seat1Hand = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21].map(dt);
+
+	// Inject 9m as the next wall tile so seat 1 draws it
+	const liveWall = [...state.liveWall];
+	if (state.wallPos < liveWall.length) {
+		liveWall[state.wallPos] = dt(9); // 9m
+	}
+
+	const players = state.players.map((p, i) => {
+		if (i === 0)
+			return {
+				...p,
+				hand: playerHand,
+				melds: [],
+				discards: [],
+				isRiichi: false,
+				isDoubleRiichi: false,
+				isIppatsu: false,
+				isFuriten: false,
+				isTempFuriten: false
+			};
+		if (i === 1)
+			return {
+				...p,
+				hand: seat1Hand,
+				melds: [],
+				discards: [],
+				isRiichi: false,
+				isDoubleRiichi: false,
+				isIppatsu: false,
+				isFuriten: false,
+				isTempFuriten: false
+			};
+		return p;
+	}) as GameState['players'];
+
+	gameState.set(
+		patch(state, {
+			phase: 'player_discard',
+			currentSeat: 0,
+			players,
+			liveWall,
+			anyCallMadeThisRound: false,
+			pendingTsumo: null,
+			pendingRon: null,
+			claimOptions: null
+		})
+	);
+}
+
 // Furiten setup: player is in tenpai waiting on S5, isTempFuriten=true, and seat 1 just
 // discarded S5. Ron button should be absent; 振聴 badge should show.
 export async function devSetFuriten() {

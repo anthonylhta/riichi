@@ -24,6 +24,8 @@ function makePlayer(seat: Seat): PlayerState {
 		isHuman: seat === 0,
 		difficulty: seat === 0 ? null : seat === 3 ? 'good' : 'basic',
 		isRiichi: false,
+		isDoubleRiichi: false,
+		isIppatsu: false,
 		riichiTile: null,
 		isFuriten: false,
 		isTempFuriten: false
@@ -40,7 +42,9 @@ function initRound(
 
 	const liveWall = shuffled.slice(0, 122);
 	const deadWall = shuffled.slice(122);
+	// Dora indicators: deadWall[4..8], ura dora indicators: deadWall[9..13]
 	const doraIndicators = [deadWall[4]];
+	const uraDoraIndicators = [deadWall[9]];
 
 	const players: [PlayerState, PlayerState, PlayerState, PlayerState] = [
 		makePlayer(0),
@@ -76,6 +80,8 @@ function initRound(
 		deadWall,
 		rinshankPos: 0,
 		doraIndicators,
+		uraDoraIndicators,
+		anyCallMadeThisRound: false,
 		players,
 		lastDiscard: null,
 		lastDiscardSeat: null,
@@ -141,8 +147,8 @@ function drawTile(state: GameState, seat: Seat): GameState {
 	};
 }
 
-function openMeldsFor(player: PlayerState): TileCode[][] {
-	return player.melds.map((m) => m.tiles.map((t) => t.code));
+function openMeldsFor(player: PlayerState): [boolean, TileCode[]][] {
+	return player.melds.map((m) => [m.type !== 'ankan', m.tiles.map((t) => t.code)]);
 }
 
 export async function checkTsumo(
@@ -154,13 +160,21 @@ export async function checkTsumo(
 	const totalTiles = player.hand.length + player.melds.reduce((s, m) => s + m.tiles.length, 0);
 	if (totalTiles !== 14) return null;
 
+	const isLastTile = state.wallPos >= state.liveWall.length;
+	const isFirstTake = player.discards.length === 0 && !state.anyCallMadeThisRound;
+
 	const result = await checkWin({
 		handCodes: player.hand.map((t) => t.code),
 		openMelds: openMeldsFor(player),
 		doraIndicators: state.doraIndicators,
+		uraDoraIndicators: state.uraDoraIndicators,
 		isRiichi: player.isRiichi,
+		isDoubleRiichi: player.isDoubleRiichi,
+		isIppatsu: player.isIppatsu,
 		isTsumo: true,
 		afterKan,
+		firstTake: isFirstTake,
+		lastTile: isLastTile,
 		ronTileCode: null,
 		seatWind: getSeatWind(seat, state.dealer),
 		roundWind: getRoundWind()
@@ -205,13 +219,18 @@ export async function checkRon(
 	discarderSeat: Seat
 ): Promise<RoundResult | null> {
 	const player = state.players[claimantSeat];
+	const isLastTile = state.wallPos >= state.liveWall.length;
 
 	const result = await checkWin({
-		handCodes: [...player.hand.map((t) => t.code), discardTile.code],
+		handCodes: player.hand.map((t) => t.code),
 		openMelds: openMeldsFor(player),
 		doraIndicators: state.doraIndicators,
+		uraDoraIndicators: state.uraDoraIndicators,
 		isRiichi: player.isRiichi,
+		isDoubleRiichi: player.isDoubleRiichi,
+		isIppatsu: player.isIppatsu,
 		isTsumo: false,
+		lastTile: isLastTile,
 		ronTileCode: discardTile.code,
 		seatWind: getSeatWind(claimantSeat, state.dealer),
 		roundWind: getRoundWind()
@@ -328,18 +347,22 @@ function drawRinshan(state: GameState, seat: Seat): GameState {
 	const players = clonePlayers(state);
 	players[seat].hand = [...players[seat].hand, tile];
 
-	// Flip a new dora indicator after each kan
+	// Flip a new dora + ura dora indicator after each kan
 	const newDoraIdx = 4 + state.doraIndicators.length;
+	const newUraDoraIdx = 9 + state.uraDoraIndicators.length;
 	const newDoraIndicators =
-		newDoraIdx < state.deadWall.length
-			? [...state.doraIndicators, state.deadWall[newDoraIdx]]
-			: state.doraIndicators;
+		newDoraIdx < 9 ? [...state.doraIndicators, state.deadWall[newDoraIdx]] : state.doraIndicators;
+	const newUraDoraIndicators =
+		newUraDoraIdx < state.deadWall.length
+			? [...state.uraDoraIndicators, state.deadWall[newUraDoraIdx]]
+			: state.uraDoraIndicators;
 
 	return {
 		...state,
 		players,
 		rinshankPos: state.rinshankPos + 1,
 		doraIndicators: newDoraIndicators,
+		uraDoraIndicators: newUraDoraIndicators,
 		turnCount: state.turnCount + 1,
 		phase: seat === 0 ? 'player_discard' : 'ai_turn',
 		currentSeat: seat,
@@ -385,8 +408,15 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 	players[0].hand = sortHand(player.hand.filter((t) => t.id !== tileId));
 	players[0].discards = [...player.discards, tile];
 
+	if (player.isRiichi && player.isIppatsu) {
+		// Post-riichi discard clears the ippatsu window
+		players[0].isIppatsu = false;
+	}
+
 	if (canDeclareRiichi) {
 		players[0].isRiichi = true;
+		players[0].isIppatsu = true;
+		players[0].isDoubleRiichi = player.discards.length === 0 && !state.anyCallMadeThisRound;
 		players[0].riichiTile = tile;
 		players[0].score -= 1000;
 	}
@@ -435,6 +465,12 @@ export async function humanDeclareRon(state: GameState): Promise<GameState> {
 	return applyRoundResult(state, ron);
 }
 
+function applyCall(state: GameState, players: ReturnType<typeof clonePlayers>): GameState {
+	// Any call cancels ippatsu for all players and disqualifies first-take yaku
+	for (const p of players) p.isIppatsu = false;
+	return { ...state, players, anyCallMadeThisRound: true, pendingRon: null, claimOptions: null };
+}
+
 export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameState {
 	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
 
@@ -453,14 +489,7 @@ export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameStat
 	);
 	players[0].melds = [...player.melds, meld];
 
-	return {
-		...state,
-		players,
-		phase: 'player_discard',
-		currentSeat: 0,
-		pendingRon: null,
-		claimOptions: null
-	};
+	return { ...applyCall(state, players), phase: 'player_discard', currentSeat: 0 };
 }
 
 export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameState {
@@ -481,14 +510,7 @@ export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameStat
 	);
 	players[0].melds = [...player.melds, meld];
 
-	return {
-		...state,
-		players,
-		phase: 'player_discard',
-		currentSeat: 0,
-		pendingRon: null,
-		claimOptions: null
-	};
+	return { ...applyCall(state, players), phase: 'player_discard', currentSeat: 0 };
 }
 
 export async function humanDeclareAnkan(state: GameState, code: TileCode): Promise<GameState> {
@@ -504,8 +526,11 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 		...player.melds,
 		{ type: 'ankan', tiles: matching.slice(0, 4), calledFrom: null }
 	];
+	// Ankan doesn't cancel ippatsu but does mark a call made
+	for (const p of players) if (p.seat !== 0) p.isIppatsu = false;
+	const postKan = { ...state, players, anyCallMadeThisRound: true };
 
-	const drawn = drawRinshan({ ...state, players }, 0);
+	const drawn = drawRinshan(postKan, 0);
 	const tsumo = await checkTsumo(drawn, 0, true);
 	return { ...drawn, pendingTsumo: tsumo };
 }
@@ -532,8 +557,10 @@ export async function humanDeclareKakan(state: GameState, meldIndex: number): Pr
 	players[0].melds = player.melds.map((m, i) =>
 		i === meldIndex ? { ...m, type: 'kakan' as const, tiles: [...m.tiles, addedTile] } : m
 	);
+	for (const p of players) p.isIppatsu = false;
+	const postKan = { ...state, players, anyCallMadeThisRound: true };
 
-	const drawn = drawRinshan({ ...state, players }, 0);
+	const drawn = drawRinshan(postKan, 0);
 	const tsumo = await checkTsumo(drawn, 0, true);
 	return { ...drawn, pendingTsumo: tsumo };
 }
@@ -558,7 +585,7 @@ export async function humanClaimDaiminkan(
 	players[0].hand = sortHand(player.hand.filter((t) => !handTileIds.has(t.id)));
 	players[0].melds = [...player.melds, meld];
 
-	const postKan: GameState = { ...state, players, pendingRon: null, claimOptions: null };
+	const postKan = applyCall(state, players);
 	const drawn = drawRinshan(postKan, 0);
 	const tsumo = await checkTsumo(drawn, 0, true);
 	return { ...drawn, pendingTsumo: tsumo };
@@ -619,7 +646,8 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 				...aiPlayer.melds,
 				{ type: 'ankan' as const, tiles: matching.slice(0, 4), calledFrom: null }
 			];
-			s = drawRinshan({ ...s, players }, seat);
+			for (const p of players) if (p.seat !== seat) p.isIppatsu = false;
+			s = drawRinshan({ ...s, players, anyCallMadeThisRound: true }, seat);
 			const kanTsumo = await checkTsumo(s, seat, true);
 			if (kanTsumo) return applyRoundResult(s, kanTsumo);
 		}
@@ -639,7 +667,8 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 				players[seat].melds = aiPlayer.melds.map((m, i) =>
 					i === meldIndex ? { ...m, type: 'kakan' as const, tiles: [...m.tiles, addedTile] } : m
 				);
-				s = drawRinshan({ ...s, players }, seat);
+				for (const p of players) p.isIppatsu = false;
+				s = drawRinshan({ ...s, players, anyCallMadeThisRound: true }, seat);
 				const kanTsumo = await checkTsumo(s, seat, true);
 				if (kanTsumo) return applyRoundResult(s, kanTsumo);
 			}
@@ -649,6 +678,8 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	if (shouldDeclareRiichi(seat, s)) {
 		const players = clonePlayers(s);
 		players[seat].isRiichi = true;
+		players[seat].isIppatsu = true;
+		players[seat].isDoubleRiichi = s.players[seat].discards.length === 0 && !s.anyCallMadeThisRound;
 		players[seat].score -= 1000;
 		s = { ...s, players };
 	}
@@ -657,14 +688,18 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	const players = clonePlayers(s);
 	players[seat].hand = sortHand(s.players[seat].hand.filter((t) => t.id !== discardTile.id));
 	players[seat].discards = [...s.players[seat].discards, discardTile];
+	// Post-riichi discard clears this AI player's ippatsu window
+	if (s.players[seat].isRiichi && s.players[seat].isIppatsu) {
+		players[seat].isIppatsu = false;
+	}
 
 	const nextSeat = ((seat + 1) % 4) as Seat;
 	s = {
 		...s,
 		players,
 		lastDiscard: discardTile,
-		lastDiscardSeat: seat,
 		currentSeat: nextSeat,
+		lastDiscardSeat: seat,
 		phase: 'ai_turn'
 	};
 
@@ -732,10 +767,13 @@ async function computeOwnDiscardFuriten(state: GameState, seat: Seat): Promise<b
 	const uniqueCodes = [...new Set(player.discards.map((t) => t.code))];
 	for (const code of uniqueCodes) {
 		const result = await checkWin({
-			handCodes: [...player.hand.map((t) => t.code), code],
+			handCodes: player.hand.map((t) => t.code),
 			openMelds: openMeldsFor(player),
 			doraIndicators: state.doraIndicators,
+			uraDoraIndicators: state.uraDoraIndicators,
 			isRiichi: player.isRiichi,
+			isDoubleRiichi: player.isDoubleRiichi,
+			isIppatsu: player.isIppatsu,
 			isTsumo: false,
 			ronTileCode: code,
 			seatWind: getSeatWind(seat, state.dealer),

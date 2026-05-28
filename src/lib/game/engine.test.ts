@@ -40,6 +40,8 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 		isHuman: seat === 0,
 		difficulty: seat === 0 ? null : 'basic',
 		isRiichi: false,
+		isDoubleRiichi: false,
+		isIppatsu: false,
 		riichiTile: null,
 		isFuriten: false,
 		isTempFuriten: false,
@@ -62,6 +64,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		deadWall,
 		rinshankPos: 0,
 		doraIndicators: [tile(1, 100)],
+		uraDoraIndicators: [tile(2, 101)],
+		anyCallMadeThisRound: false,
 		players: [makePlayer(0), makePlayer(1), makePlayer(2), makePlayer(3)] as [
 			PlayerState,
 			PlayerState,
