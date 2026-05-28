@@ -8,6 +8,7 @@ interface WinCheckInput {
 	doraIndicators: GameTile[];
 	isRiichi: boolean;
 	isTsumo: boolean;
+	afterKan?: boolean;
 	ronTileCode: TileCode | null;
 	seatWind: TileCode;
 	roundWind: TileCode;
@@ -83,7 +84,7 @@ export async function checkWin(input: WinCheckInput): Promise<WinResult> {
 				riichi: input.isRiichi,
 				ippatsu: false,
 				double_riichi: false,
-				after_kan: false,
+				after_kan: input.afterKan ?? false,
 				first_take: false,
 				tile_discarded_by_someone: input.isTsumo ? -1 : (input.ronTileCode ?? -1),
 				bakaze: input.roundWind,

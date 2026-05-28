@@ -4,14 +4,14 @@ export type Seat = 0 | 1 | 2 | 3;
 export type AiDifficulty = 'basic' | 'good';
 
 export interface Meld {
-	type: 'pon' | 'chi';
-	tiles: [GameTile, GameTile, GameTile];
-	calledFrom: Seat;
+	type: 'pon' | 'chi' | 'ankan' | 'daiminkan' | 'kakan';
+	tiles: GameTile[];
+	calledFrom: Seat | null; // null for ankan
 }
 
 export interface ClaimOption {
-	type: 'pon' | 'chi';
-	handTiles: [GameTile, GameTile];
+	type: 'pon' | 'chi' | 'kan';
+	handTiles: GameTile[];
 }
 
 export interface PlayerState {
@@ -56,6 +56,8 @@ export interface GameState {
 
 	liveWall: GameTile[];
 	wallPos: number;
+	deadWall: GameTile[];
+	rinshankPos: number; // 0–3, index into deadWall for next rinshan draw
 	doraIndicators: GameTile[];
 
 	players: [PlayerState, PlayerState, PlayerState, PlayerState];

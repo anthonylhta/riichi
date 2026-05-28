@@ -10,8 +10,12 @@ import {
 	humanClaimPon,
 	humanClaimChi,
 	humanPassClaim,
+	humanDeclareAnkan,
+	humanDeclareKakan,
+	humanClaimDaiminkan,
 	stepAiTurn
 } from '$lib/game/engine';
+import type { TileCode } from '$lib/game/tiles';
 
 export const gameState = writable<GameState | null>(null);
 export const gameLoading = writable(false);
@@ -85,7 +89,7 @@ export async function declareRon() {
 	}
 }
 
-export function claimPon(handTiles: [GameTile, GameTile]) {
+export function claimPon(handTiles: GameTile[]) {
 	const current = get(gameState);
 	if (!current) return;
 	try {
@@ -96,7 +100,7 @@ export function claimPon(handTiles: [GameTile, GameTile]) {
 	}
 }
 
-export function claimChi(handTiles: [GameTile, GameTile]) {
+export function claimChi(handTiles: GameTile[]) {
 	const current = get(gameState);
 	if (!current) return;
 	try {
@@ -104,6 +108,48 @@ export function claimChi(handTiles: [GameTile, GameTile]) {
 		gameState.set(next);
 	} catch (e) {
 		console.error('claimChi failed:', e);
+	}
+}
+
+export async function claimDaiminkan(handTiles: GameTile[]) {
+	const current = get(gameState);
+	if (!current) return;
+	try {
+		const next = await humanClaimDaiminkan(current, handTiles);
+		gameState.set(next);
+		if (next.phase === 'ai_turn') {
+			await runUntilPlayerTurn(next);
+		}
+	} catch (e) {
+		console.error('claimDaiminkan failed:', e);
+	}
+}
+
+export async function declareAnkan(code: TileCode) {
+	const current = get(gameState);
+	if (!current) return;
+	try {
+		const next = await humanDeclareAnkan(current, code);
+		gameState.set(next);
+		if (next.phase === 'ai_turn') {
+			await runUntilPlayerTurn(next);
+		}
+	} catch (e) {
+		console.error('declareAnkan failed:', e);
+	}
+}
+
+export async function declareKakan(meldIndex: number) {
+	const current = get(gameState);
+	if (!current) return;
+	try {
+		const next = await humanDeclareKakan(current, meldIndex);
+		gameState.set(next);
+		if (next.phase === 'ai_turn') {
+			await runUntilPlayerTurn(next);
+		}
+	} catch (e) {
+		console.error('declareKakan failed:', e);
 	}
 }
 

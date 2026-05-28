@@ -11,10 +11,14 @@
 		declareRon,
 		claimPon,
 		claimChi,
+		claimDaiminkan,
+		declareAnkan,
+		declareKakan,
 		passClaim
 	} from '$lib/stores/game';
 	import { tileLabel, suitClass } from '$lib/game/tiles';
 	import { isTenpaiAfterDiscard } from '$lib/game/ai';
+	import { getPlayerKanOptions } from '$lib/game/engine';
 
 	let selectedTileId = $state<number | null>(null);
 
@@ -47,6 +51,9 @@
 	let devSetPonClaim: (() => Promise<void>) | null = null;
 	let devSetChiClaim: (() => Promise<void>) | null = null;
 	let devSetFuriten: (() => Promise<void>) | null = null;
+	let devSetAnkan: (() => Promise<void>) | null = null;
+	let devSetKakan: (() => Promise<void>) | null = null;
+	let devSetDaiminkan: (() => Promise<void>) | null = null;
 
 	if (isDev) {
 		import('$lib/game/devCheats').then((m) => {
@@ -56,8 +63,17 @@
 			devSetPonClaim = m.devSetPonClaim;
 			devSetChiClaim = m.devSetChiClaim;
 			devSetFuriten = m.devSetFuriten;
+			devSetAnkan = m.devSetAnkan;
+			devSetKakan = m.devSetKakan;
+			devSetDaiminkan = m.devSetDaiminkan;
 		});
 	}
+
+	let kanOptions = $derived(
+		$gameState?.phase === 'player_discard' && $gameState.currentSeat === 0
+			? getPlayerKanOptions($gameState)
+			: { ankan: [], kakan: [] }
+	);
 
 	let seatNames = $derived(
 		$gameState
@@ -103,6 +119,9 @@
 				<button class="dev-btn" onclick={() => devSetPonClaim?.()}>Pon claim</button>
 				<button class="dev-btn" onclick={() => devSetChiClaim?.()}>Chi claim</button>
 				<button class="dev-btn" onclick={() => devSetFuriten?.()}>Furiten (no ron)</button>
+				<button class="dev-btn" onclick={() => devSetAnkan?.()}>Ankan (4-of-a-kind)</button>
+				<button class="dev-btn" onclick={() => devSetKakan?.()}>Kakan (extend pon)</button>
+				<button class="dev-btn" onclick={() => devSetDaiminkan?.()}>Daiminkan claim</button>
 			</div>
 		{/if}
 
@@ -212,6 +231,16 @@
 								: ''}
 						</p>
 					{/if}
+					{#each kanOptions.ankan as code (code)}
+						<button class="action-btn kan-btn" onclick={() => declareAnkan(code)}>
+							Ankan 暗槓 ({tileLabel(code)}×4)
+						</button>
+					{/each}
+					{#each kanOptions.kakan as opt (opt.meldIndex)}
+						<button class="action-btn kan-btn" onclick={() => declareKakan(opt.meldIndex)}>
+							Kakan 加槓 ({tileLabel(opt.code)})
+						</button>
+					{/each}
 				{/if}
 			</div>
 		</div>
@@ -236,7 +265,11 @@
 							<button class="claim-btn btn-ron" onclick={declareRon}>Ron 栄和</button>
 						{/if}
 						{#each $gameState.claimOptions ?? [] as option, oi (oi)}
-							{#if option.type === 'pon'}
+							{#if option.type === 'kan'}
+								<button class="claim-btn btn-kan" onclick={() => claimDaiminkan(option.handTiles)}>
+									Kan 槓
+								</button>
+							{:else if option.type === 'pon'}
 								<button class="claim-btn btn-pon" onclick={() => claimPon(option.handTiles)}>
 									Pon ポン
 								</button>
@@ -617,6 +650,14 @@
 		background: #155f2d;
 	}
 
+	.kan-btn {
+		background: #4a2a80;
+	}
+
+	.kan-btn:hover {
+		background: #3a2060;
+	}
+
 	/* Claim card */
 	.claim-card {
 		background: #181818;
@@ -694,6 +735,12 @@
 	.chi-tiles {
 		font-size: 0.7rem;
 		opacity: 0.85;
+	}
+
+	.btn-kan {
+		background: #4a2a80;
+		color: #fff;
+		min-width: 80px;
 	}
 
 	.btn-pass {
