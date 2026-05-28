@@ -222,7 +222,7 @@ export async function checkRon(
 	const isLastTile = state.wallPos >= state.liveWall.length;
 
 	const result = await checkWin({
-		handCodes: [...player.hand.map((t) => t.code), discardTile.code],
+		handCodes: player.hand.map((t) => t.code),
 		openMelds: openMeldsFor(player),
 		doraIndicators: state.doraIndicators,
 		uraDoraIndicators: state.uraDoraIndicators,
@@ -701,8 +701,8 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		...s,
 		players,
 		lastDiscard: discardTile,
-		lastDiscardSeat: seat,
 		currentSeat: nextSeat,
+		lastDiscardSeat: seat,
 		phase: 'ai_turn'
 	};
 
@@ -770,7 +770,7 @@ async function computeOwnDiscardFuriten(state: GameState, seat: Seat): Promise<b
 	const uniqueCodes = [...new Set(player.discards.map((t) => t.code))];
 	for (const code of uniqueCodes) {
 		const result = await checkWin({
-			handCodes: [...player.hand.map((t) => t.code), code],
+			handCodes: player.hand.map((t) => t.code),
 			openMelds: openMeldsFor(player),
 			doraIndicators: state.doraIndicators,
 			uraDoraIndicators: state.uraDoraIndicators,

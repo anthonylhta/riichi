@@ -6,7 +6,7 @@ import type { GameTile } from './tiles';
 type RiichiMeld = [boolean, TileCode[]];
 
 interface WinCheckInput {
-	handCodes: TileCode[]; // closed tiles (14 for closed hand, fewer with melds)
+	handCodes: TileCode[]; // 14 tiles for tsumo (drawn tile in hand); 13 for ron (ron tile goes in ronTileCode)
 	openMelds: RiichiMeld[];
 	doraIndicators: GameTile[];
 	uraDoraIndicators: GameTile[];
