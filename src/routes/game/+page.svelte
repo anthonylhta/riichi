@@ -54,6 +54,7 @@
 	let devSetAnkan: (() => Promise<void>) | null = null;
 	let devSetKakan: (() => Promise<void>) | null = null;
 	let devSetDaiminkan: (() => Promise<void>) | null = null;
+	let devSetTenpaiToRon: (() => Promise<void>) | null = null;
 
 	if (isDev) {
 		import('$lib/game/devCheats').then((m) => {
@@ -66,6 +67,7 @@
 			devSetAnkan = m.devSetAnkan;
 			devSetKakan = m.devSetKakan;
 			devSetDaiminkan = m.devSetDaiminkan;
+			devSetTenpaiToRon = m.devSetTenpaiToRon;
 		});
 	}
 
@@ -122,6 +124,7 @@
 				<button class="dev-btn" onclick={() => devSetAnkan?.()}>Ankan (4-of-a-kind)</button>
 				<button class="dev-btn" onclick={() => devSetKakan?.()}>Kakan (extend pon)</button>
 				<button class="dev-btn" onclick={() => devSetDaiminkan?.()}>Daiminkan claim</button>
+				<button class="dev-btn" onclick={() => devSetTenpaiToRon?.()}>Riichi → Ippatsu Ron</button>
 			</div>
 		{/if}
 
