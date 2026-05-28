@@ -23,6 +23,8 @@ export interface PlayerState {
 	isHuman: boolean;
 	difficulty: AiDifficulty | null;
 	isRiichi: boolean;
+	isDoubleRiichi: boolean;
+	isIppatsu: boolean;
 	riichiTile: GameTile | null;
 	isFuriten: boolean; // own-discard furiten — any wait tile appears in own discards
 	isTempFuriten: boolean; // passed on a ron opportunity; clears after next discard (unless in riichi)
@@ -59,6 +61,9 @@ export interface GameState {
 	deadWall: GameTile[];
 	rinshankPos: number; // 0–3, index into deadWall for next rinshan draw
 	doraIndicators: GameTile[];
+	uraDoraIndicators: GameTile[]; // revealed only on riichi wins; mirrors doraIndicators count
+
+	anyCallMadeThisRound: boolean; // pon/chi/kan made; cancels ippatsu + disqualifies chihou/tenhou
 
 	players: [PlayerState, PlayerState, PlayerState, PlayerState];
 

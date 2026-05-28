@@ -9,9 +9,14 @@ interface WinCheckInput {
 	handCodes: TileCode[]; // closed tiles (14 for closed hand, fewer with melds)
 	openMelds: RiichiMeld[];
 	doraIndicators: GameTile[];
+	uraDoraIndicators: GameTile[];
 	isRiichi: boolean;
+	isDoubleRiichi: boolean;
+	isIppatsu: boolean;
 	isTsumo: boolean;
 	afterKan?: boolean;
+	firstTake?: boolean; // Tenhou / Chiihou
+	lastTile?: boolean; // Haitei / Houtei
 	ronTileCode: TileCode | null;
 	seatWind: TileCode;
 	roundWind: TileCode;
@@ -90,19 +95,23 @@ export async function checkWin(input: WinCheckInput): Promise<WinResult> {
 		const { calc } = await import('riichi-rs-bundlers');
 
 		const actualDora = input.doraIndicators.map((t) => doraFromIndicator(t.code));
+		// Ura dora is only revealed on riichi wins; include them in the dora array
+		const actualUraDora = input.isRiichi
+			? input.uraDoraIndicators.map((t) => doraFromIndicator(t.code))
+			: [];
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const result: any = (calc as any)({
 			closed_part: input.handCodes,
 			open_part: input.openMelds,
 			options: {
-				dora: actualDora,
+				dora: [...actualDora, ...actualUraDora],
 				aka_count: 0,
 				riichi: input.isRiichi,
-				ippatsu: false,
-				double_riichi: false,
+				ippatsu: input.isIppatsu,
+				double_riichi: input.isDoubleRiichi,
 				after_kan: input.afterKan ?? false,
-				first_take: false,
+				first_take: input.firstTake ?? false,
 				tile_discarded_by_someone: input.isTsumo ? -1 : (input.ronTileCode ?? -1),
 				bakaze: input.roundWind,
 				jikaze: input.seatWind,
@@ -113,7 +122,7 @@ export async function checkWin(input: WinCheckInput): Promise<WinResult> {
 				local_yaku_enabled: [],
 				all_local_yaku_enabled: false,
 				allow_double_yakuman: false,
-				last_tile: false
+				last_tile: input.lastTile ?? false
 			},
 			calc_hairi: false
 		});
