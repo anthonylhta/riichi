@@ -1,12 +1,16 @@
 import { writable, get } from 'svelte/store';
 import type { GameState } from '$lib/game/types';
+import type { GameTile } from '$lib/game/tiles';
 import {
 	initGame,
 	continueGame,
 	humanDiscard,
+	humanDeclareTsumo,
 	humanDeclareRon,
-	stepAiTurn,
-	canHumanRon
+	humanClaimPon,
+	humanClaimChi,
+	humanPassClaim,
+	stepAiTurn
 } from '$lib/game/engine';
 
 export const gameState = writable<GameState | null>(null);
@@ -59,6 +63,17 @@ export async function discard(tileId: number) {
 	}
 }
 
+export async function declareTsumo() {
+	const current = get(gameState);
+	if (!current) return;
+	try {
+		const next = await humanDeclareTsumo(current);
+		gameState.set(next);
+	} catch (e) {
+		console.error('declareTsumo failed:', e);
+	}
+}
+
 export async function declareRon() {
 	const current = get(gameState);
 	if (!current) return;
@@ -67,6 +82,42 @@ export async function declareRon() {
 		gameState.set(next);
 	} catch (e) {
 		console.error('declareRon failed:', e);
+	}
+}
+
+export function claimPon(handTiles: [GameTile, GameTile]) {
+	const current = get(gameState);
+	if (!current) return;
+	try {
+		const next = humanClaimPon(current, handTiles);
+		gameState.set(next);
+	} catch (e) {
+		console.error('claimPon failed:', e);
+	}
+}
+
+export function claimChi(handTiles: [GameTile, GameTile]) {
+	const current = get(gameState);
+	if (!current) return;
+	try {
+		const next = humanClaimChi(current, handTiles);
+		gameState.set(next);
+	} catch (e) {
+		console.error('claimChi failed:', e);
+	}
+}
+
+export async function passClaim() {
+	const current = get(gameState);
+	if (!current) return;
+	try {
+		const next = await humanPassClaim(current);
+		gameState.set(next);
+		if (next.phase === 'ai_turn') {
+			await runUntilPlayerTurn(next);
+		}
+	} catch (e) {
+		console.error('passClaim failed:', e);
 	}
 }
 
@@ -82,10 +133,4 @@ export async function nextRound() {
 	} catch (e) {
 		console.error('nextRound failed:', e);
 	}
-}
-
-export function canRon(): boolean {
-	const current = get(gameState);
-	if (!current) return false;
-	return canHumanRon(current);
 }
