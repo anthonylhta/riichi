@@ -153,6 +153,9 @@
 				<span class="player-name">
 					{seatNames[0]}
 					{#if $gameState.players[0].isRiichi}<span class="riichi-badge">立直</span>{/if}
+					{#if $gameState.players[0].isFuriten || $gameState.players[0].isTempFuriten}
+						<span class="furiten-badge">振聴</span>
+					{/if}
 				</span>
 				<span class="player-score">{$gameState.players[0].score.toLocaleString()} pts</span>
 			</div>
@@ -388,6 +391,14 @@
 	.riichi-badge {
 		color: #c41e3a;
 		font-size: 0.8rem;
+	}
+
+	.furiten-badge {
+		color: #888;
+		font-size: 0.75rem;
+		border: 1px solid #444;
+		border-radius: 3px;
+		padding: 0 4px;
 	}
 
 	.opponent-score {
