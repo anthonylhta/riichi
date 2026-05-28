@@ -38,6 +38,25 @@
 	const WIND_NAMES = ['East', 'South', 'West', 'North'];
 	const ROUND_NAMES = ['East 1', 'East 2', 'East 3', 'East 4'];
 
+	// Dev panel — only compiled in dev builds
+	const isDev = import.meta.env.DEV;
+	let devPanelOpen = $state(false);
+	let devSetTenpai: (() => Promise<void>) | null = null;
+	let devSetWinningHand: (() => Promise<void>) | null = null;
+	let devSetRonClaim: (() => Promise<void>) | null = null;
+	let devSetPonClaim: (() => Promise<void>) | null = null;
+	let devSetChiClaim: (() => Promise<void>) | null = null;
+
+	if (isDev) {
+		import('$lib/game/devCheats').then((m) => {
+			devSetTenpai = m.devSetTenpai;
+			devSetWinningHand = m.devSetWinningHand;
+			devSetRonClaim = m.devSetRonClaim;
+			devSetPonClaim = m.devSetPonClaim;
+			devSetChiClaim = m.devSetChiClaim;
+		});
+	}
+
 	let seatNames = $derived(
 		$gameState
 			? ([0, 1, 2, 3] as const).map((seat) => {
@@ -65,7 +84,24 @@
 				<span class="honba">{$gameState.honba} Honba</span>
 			{/if}
 			<span class="wall-count">Wall: {$gameState.liveWall.length - $gameState.wallPos} tiles</span>
+			{#if isDev}
+				<button class="dev-toggle" onclick={() => (devPanelOpen = !devPanelOpen)}>
+					{devPanelOpen ? '✕ Dev' : '⚙ Dev'}
+				</button>
+			{/if}
 		</header>
+
+		<!-- Dev cheat panel -->
+		{#if isDev && devPanelOpen}
+			<div class="dev-panel">
+				<span class="dev-label">Dev scenarios</span>
+				<button class="dev-btn" onclick={() => devSetTenpai?.()}>Tenpai hand</button>
+				<button class="dev-btn" onclick={() => devSetWinningHand?.()}>Winning → Tsumo</button>
+				<button class="dev-btn" onclick={() => devSetRonClaim?.()}>Ron claim</button>
+				<button class="dev-btn" onclick={() => devSetPonClaim?.()}>Pon claim</button>
+				<button class="dev-btn" onclick={() => devSetChiClaim?.()}>Chi claim</button>
+			</div>
+		{/if}
 
 		<!-- Opponent info row -->
 		<div class="opponents">
@@ -731,5 +767,55 @@
 		color: #666;
 		max-width: 500px;
 		white-space: pre-wrap;
+	}
+
+	/* Dev panel */
+	.dev-toggle {
+		margin-left: auto;
+		padding: 0.2rem 0.6rem;
+		background: #1a1a1a;
+		border: 1px solid #444;
+		border-radius: 4px;
+		color: #888;
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.dev-toggle:hover {
+		border-color: #666;
+		color: #bbb;
+	}
+
+	.dev-panel {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		padding: 0.5rem 0.75rem;
+		background: #0d0d0d;
+		border: 1px dashed #333;
+		border-radius: 6px;
+		font-size: 0.75rem;
+	}
+
+	.dev-label {
+		color: #555;
+		white-space: nowrap;
+	}
+
+	.dev-btn {
+		padding: 0.3rem 0.7rem;
+		background: #1e1e1e;
+		border: 1px solid #444;
+		border-radius: 4px;
+		color: #aaa;
+		font-size: 0.75rem;
+		cursor: pointer;
+		transition: border-color 0.1s;
+	}
+
+	.dev-btn:hover {
+		border-color: #888;
+		color: #e8e0d5;
 	}
 </style>
