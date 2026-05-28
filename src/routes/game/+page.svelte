@@ -147,7 +147,10 @@
 							{#each $gameState.players[seat].melds as meld, mi (mi)}
 								<span class="meld-group">
 									{#each meld.tiles as tile (tile.id)}
-										<div class="tile tile-small tile-{suitClass(tile.code)}">
+										<div
+											class="tile tile-small tile-{suitClass(tile.code)}"
+											class:tile-red={tile.isRed}
+										>
 											{tileLabel(tile.code)}
 										</div>
 									{/each}
@@ -157,7 +160,9 @@
 					{/if}
 					<div class="discard-row">
 						{#each $gameState.players[seat].discards as tile (tile.id)}
-							<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
+							<div class="tile tile-small tile-{suitClass(tile.code)}" class:tile-red={tile.isRed}>
+								{tileLabel(tile.code)}
+							</div>
 						{/each}
 					</div>
 				</div>
@@ -168,7 +173,9 @@
 		<div class="dora-row">
 			<span class="dora-label">Dora indicator:</span>
 			{#each $gameState.doraIndicators as tile (tile.id)}
-				<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
+				<div class="tile tile-small tile-{suitClass(tile.code)}" class:tile-red={tile.isRed}>
+					{tileLabel(tile.code)}
+				</div>
 			{/each}
 		</div>
 
@@ -187,7 +194,9 @@
 
 			<div class="player-discards">
 				{#each $gameState.players[0].discards as tile (tile.id)}
-					<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
+					<div class="tile tile-small tile-{suitClass(tile.code)}" class:tile-red={tile.isRed}>
+						{tileLabel(tile.code)}
+					</div>
 				{/each}
 			</div>
 
@@ -196,6 +205,7 @@
 					{#each $gameState.players[0].hand as tile (tile.id)}
 						<button
 							class="tile tile-large tile-{suitClass(tile.code)}"
+							class:tile-red={tile.isRed}
 							class:selected={selectedTileId === tile.id}
 							class:clickable={$gameState.phase === 'player_discard'}
 							class:riichi-trigger={$gameState.phase === 'player_discard' &&
@@ -213,7 +223,10 @@
 						{#each $gameState.players[0].melds as meld, mi (mi)}
 							<div class="meld-group">
 								{#each meld.tiles as tile (tile.id)}
-									<div class="tile tile-large tile-{suitClass(tile.code)}">
+									<div
+										class="tile tile-large tile-{suitClass(tile.code)}"
+										class:tile-red={tile.isRed}
+									>
 										{tileLabel(tile.code)}
 									</div>
 								{/each}
@@ -255,7 +268,10 @@
 					<div class="claim-title">Your turn to claim</div>
 					{#if $gameState.lastDiscard}
 						<div class="claim-tile-display">
-							<div class="tile tile-large tile-{suitClass($gameState.lastDiscard.code)}">
+							<div
+								class="tile tile-large tile-{suitClass($gameState.lastDiscard.code)}"
+								class:tile-red={$gameState.lastDiscard.isRed}
+							>
 								{tileLabel($gameState.lastDiscard.code)}
 							</div>
 							<span class="claim-from"
@@ -640,6 +656,12 @@
 	}
 	.tile-dragon-chun {
 		color: #c41e3a;
+	}
+	/* Aka dora (red five) — crimson accent regardless of suit, number stays legible. */
+	.tile-red {
+		border-color: #c41e3a;
+		background: #3a1418;
+		box-shadow: 0 0 4px rgba(196, 30, 58, 0.55);
 	}
 
 	.action-hint {

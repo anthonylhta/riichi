@@ -194,6 +194,15 @@ function openMeldsFor(player: PlayerState): [boolean, TileCode[]][] {
 	return player.melds.map((m) => [m.type !== 'ankan', m.tiles.map((t) => t.code)]);
 }
 
+// Count red-five (aka dora) tiles across a set of tiles — used to score aka dora.
+function countAka(tiles: GameTile[]): number {
+	return tiles.filter((t) => t.isRed).length;
+}
+
+function meldTiles(player: PlayerState): GameTile[] {
+	return player.melds.flatMap((m) => m.tiles);
+}
+
 export async function checkTsumo(
 	state: GameState,
 	seat: Seat,
@@ -218,6 +227,7 @@ export async function checkTsumo(
 		afterKan,
 		firstTake: isFirstTake,
 		lastTile: isLastTile,
+		akaCount: countAka(player.hand) + countAka(meldTiles(player)),
 		ronTileCode: null,
 		seatWind: getSeatWind(seat, state.dealer),
 		roundWind: getRoundWind()
@@ -274,6 +284,7 @@ export async function checkRon(
 		isIppatsu: player.isIppatsu,
 		isTsumo: false,
 		lastTile: isLastTile,
+		akaCount: countAka(player.hand) + countAka(meldTiles(player)) + countAka([discardTile]),
 		ronTileCode: discardTile.code,
 		seatWind: getSeatWind(claimantSeat, state.dealer),
 		roundWind: getRoundWind()

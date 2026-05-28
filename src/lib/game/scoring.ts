@@ -17,6 +17,7 @@ interface WinCheckInput {
 	afterKan?: boolean;
 	firstTake?: boolean; // Tenhou / Chiihou
 	lastTile?: boolean; // Haitei / Houtei
+	akaCount?: number; // number of red-five (aka dora) tiles in the winning hand
 	ronTileCode: TileCode | null;
 	seatWind: TileCode;
 	roundWind: TileCode;
@@ -106,7 +107,7 @@ export async function checkWin(input: WinCheckInput): Promise<WinResult> {
 			open_part: input.openMelds,
 			options: {
 				dora: [...actualDora, ...actualUraDora],
-				aka_count: 0,
+				aka_count: input.akaCount ?? 0,
 				riichi: input.isRiichi,
 				ippatsu: input.isIppatsu,
 				double_riichi: input.isDoubleRiichi,
@@ -115,7 +116,7 @@ export async function checkWin(input: WinCheckInput): Promise<WinResult> {
 				tile_discarded_by_someone: input.isTsumo ? -1 : (input.ronTileCode ?? -1),
 				bakaze: input.roundWind,
 				jikaze: input.seatWind,
-				allow_aka: false,
+				allow_aka: true,
 				allow_kuitan: true,
 				with_kiriage: false,
 				disabled_yaku: [],
