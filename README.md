@@ -5,7 +5,7 @@ A browser-based riichi mahjong game built to help you learn the game and get bet
 Live at [riichi.anthonyta.dev](https://riichi.anthonyta.dev)
 
 > Active development, working toward a first complete version. The project is not yet
-> feature-complete — this README describes what Riichi *is* and where it's going, rather
+> feature-complete — this README describes what Riichi _is_ and where it's going, rather
 > than tracking which pieces are done at any given moment.
 
 ## What this is
@@ -13,7 +13,7 @@ Live at [riichi.anthonyta.dev](https://riichi.anthonyta.dev)
 Most mahjong clients compete on features and polish. Riichi competes on **understanding**.
 It came out of a simple frustration: learning riichi mahjong is hard when good learning
 resources are scarce. Riichi is the tool the author wished existed — not another place to
-grind games, but a place to understand *why* a play is good.
+grind games, but a place to understand _why_ a play is good.
 
 It's a passion project and a learning project, and it's free.
 
@@ -30,7 +30,7 @@ It's a passion project and a learning project, and it's free.
 
 ## Learning features (the direction)
 
-These are what make Riichi a *learning* tool rather than just a game. They're powered by
+These are what make Riichi a _learning_ tool rather than just a game. They're powered by
 the Claude API, designed to be genuinely cheap to run, and are being built on top of the
 core game:
 
@@ -42,7 +42,7 @@ core game:
 - **Improvement tracking** — win rate, deal-in rate, and efficiency trends over time, for
   players with an account.
 
-Accounts are optional and only needed to *save* things (history, progress, streaks). You
+Accounts are optional and only needed to _save_ things (history, progress, streaks). You
 can always play anonymously.
 
 ## How it's built
