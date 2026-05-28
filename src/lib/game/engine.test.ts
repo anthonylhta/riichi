@@ -41,6 +41,8 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 		difficulty: seat === 0 ? null : 'basic',
 		isRiichi: false,
 		riichiTile: null,
+		isFuriten: false,
+		isTempFuriten: false,
 		...overrides
 	};
 }
@@ -317,5 +319,87 @@ describe('humanDiscard — riichi auto-declare', () => {
 
 		expect(result.players[0].isRiichi).toBe(true); // unchanged
 		expect(result.players[0].score).toBe(25000); // no additional bet
+	});
+});
+
+// ─── furiten ─────────────────────────────────────────────────────────────────
+
+describe('furiten', () => {
+	it('sets isTempFuriten when passing on an available ron', async () => {
+		const pendingRon: RoundResult = {
+			winner: 0,
+			winType: 'ron',
+			loser: 1,
+			han: 2,
+			fu: 30,
+			score: 3900,
+			pointChanges: [3900, -3900, 0, 0]
+		};
+
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscardSeat: 1,
+			pendingRon,
+			claimOptions: []
+		});
+
+		const result = await humanPassClaim(state);
+
+		expect(result.players[0].isTempFuriten).toBe(true);
+	});
+
+	it('does not set isTempFuriten when passing with no ron available', async () => {
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscardSeat: 1,
+			pendingRon: null,
+			claimOptions: [{ type: 'pon', handTiles: [tile(5, 1), tile(5, 2)] }]
+		});
+
+		const result = await humanPassClaim(state);
+
+		expect(result.players[0].isTempFuriten).toBe(false);
+	});
+
+	it('clears isTempFuriten after the player discards (not in riichi)', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+
+		const hand = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((code, i) => tile(code, i + 1));
+		const discard = hand[12];
+
+		const state = makeState({
+			phase: 'player_discard',
+			players: [
+				makePlayer(0, { hand, isTempFuriten: true }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, discard.id);
+
+		expect(result.players[0].isTempFuriten).toBe(false);
+	});
+
+	it('preserves isTempFuriten after discard when in riichi', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+
+		const hand = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((code, i) => tile(code, i + 1));
+		const discard = hand[12];
+
+		const state = makeState({
+			phase: 'player_discard',
+			players: [
+				makePlayer(0, { hand, isRiichi: true, isTempFuriten: true }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, discard.id);
+
+		expect(result.players[0].isTempFuriten).toBe(true);
 	});
 });
