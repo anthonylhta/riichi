@@ -7,10 +7,14 @@
 		startGame,
 		nextRound,
 		discard,
+		declareTsumo,
 		declareRon,
-		canRon
+		claimPon,
+		claimChi,
+		passClaim
 	} from '$lib/stores/game';
 	import { tileLabel, suitClass } from '$lib/game/tiles';
+	import { isTenpaiAfterDiscard } from '$lib/game/ai';
 
 	let selectedTileId = $state<number | null>(null);
 
@@ -25,12 +29,23 @@
 		selectedTileId = null;
 	}
 
-	async function handleRon() {
-		await declareRon();
+	function wouldTriggerRiichi(tileId: number): boolean {
+		const player = $gameState?.players[0];
+		if (!player || player.isRiichi || player.melds.length > 0) return false;
+		return isTenpaiAfterDiscard(player.hand, tileId);
 	}
 
-	const SEAT_NAMES = ['You (East)', 'South', 'West', 'North'];
+	const WIND_NAMES = ['East', 'South', 'West', 'North'];
 	const ROUND_NAMES = ['East 1', 'East 2', 'East 3', 'East 4'];
+
+	let seatNames = $derived(
+		$gameState
+			? ([0, 1, 2, 3] as const).map((seat) => {
+					const windIdx = (seat - $gameState!.dealer + 4) % 4;
+					return seat === 0 ? `You (${WIND_NAMES[windIdx]})` : WIND_NAMES[windIdx];
+				})
+			: ['You', 'South', 'West', 'North']
+	);
 </script>
 
 <div class="game-wrapper">
@@ -57,7 +72,7 @@
 			{#each [1, 2, 3] as seat (seat)}
 				<div class="opponent-panel" class:riichi={$gameState.players[seat].isRiichi}>
 					<div class="opponent-name">
-						{SEAT_NAMES[seat]}
+						{seatNames[seat]}
 						{#if $gameState.players[seat].isRiichi}<span class="riichi-badge">立直</span>{/if}
 					</div>
 					<div class="opponent-score">{$gameState.players[seat].score.toLocaleString()}</div>
@@ -66,6 +81,19 @@
 							<div class="tile tile-back" data-id={tile.id}></div>
 						{/each}
 					</div>
+					{#if $gameState.players[seat].melds.length > 0}
+						<div class="meld-row">
+							{#each $gameState.players[seat].melds as meld, mi (mi)}
+								<span class="meld-group">
+									{#each meld.tiles as tile (tile.id)}
+										<div class="tile tile-small tile-{suitClass(tile.code)}">
+											{tileLabel(tile.code)}
+										</div>
+									{/each}
+								</span>
+							{/each}
+						</div>
+					{/if}
 					<div class="discard-row">
 						{#each $gameState.players[seat].discards as tile (tile.id)}
 							<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
@@ -87,7 +115,7 @@
 		<div class="player-area">
 			<div class="player-meta">
 				<span class="player-name">
-					{SEAT_NAMES[0]}
+					{seatNames[0]}
 					{#if $gameState.players[0].isRiichi}<span class="riichi-badge">立直</span>{/if}
 				</span>
 				<span class="player-score">{$gameState.players[0].score.toLocaleString()} pts</span>
@@ -99,28 +127,93 @@
 				{/each}
 			</div>
 
-			<div class="player-hand">
-				{#each $gameState.players[0].hand as tile (tile.id)}
-					<button
-						class="tile tile-large tile-{suitClass(tile.code)}"
-						class:selected={selectedTileId === tile.id}
-						class:clickable={$gameState.phase === 'player_discard'}
-						disabled={$gameState.phase !== 'player_discard'}
-						onclick={() => handleTileClick(tile.id)}
-					>
-						{tileLabel(tile.code)}
-					</button>
-				{/each}
+			<div class="player-hand-row">
+				<div class="player-hand">
+					{#each $gameState.players[0].hand as tile (tile.id)}
+						<button
+							class="tile tile-large tile-{suitClass(tile.code)}"
+							class:selected={selectedTileId === tile.id}
+							class:clickable={$gameState.phase === 'player_discard'}
+							class:riichi-trigger={$gameState.phase === 'player_discard' &&
+								wouldTriggerRiichi(tile.id)}
+							disabled={$gameState.phase !== 'player_discard'}
+							onclick={() => handleTileClick(tile.id)}
+						>
+							{tileLabel(tile.code)}
+						</button>
+					{/each}
+				</div>
+
+				{#if $gameState.players[0].melds.length > 0}
+					<div class="player-melds">
+						{#each $gameState.players[0].melds as meld, mi (mi)}
+							<div class="meld-group">
+								{#each meld.tiles as tile (tile.id)}
+									<div class="tile tile-large tile-{suitClass(tile.code)}">
+										{tileLabel(tile.code)}
+									</div>
+								{/each}
+							</div>
+						{/each}
+					</div>
+				{/if}
 			</div>
 
-			{#if $gameState.phase === 'player_discard'}
-				<p class="action-hint">Click a tile to discard</p>
-			{/if}
-
-			{#if canRon()}
-				<button class="action-btn ron-btn" onclick={handleRon}>Ron 栄和</button>
-			{/if}
+			<div class="player-actions">
+				{#if $gameState.phase === 'player_discard'}
+					{#if $gameState.pendingTsumo}
+						<button class="action-btn tsumo-btn" onclick={declareTsumo}>Tsumo 自摸</button>
+					{:else}
+						<p class="action-hint">
+							Click a tile to discard{$gameState.players[0].isRiichi
+								? ' (Riichi — draw tile only)'
+								: ''}
+						</p>
+					{/if}
+				{/if}
+			</div>
 		</div>
+
+		<!-- Claim decision overlay -->
+		{#if $gameState.phase === 'claim_decision'}
+			<div class="overlay">
+				<div class="claim-card">
+					<div class="claim-title">Your turn to claim</div>
+					{#if $gameState.lastDiscard}
+						<div class="claim-tile-display">
+							<div class="tile tile-large tile-{suitClass($gameState.lastDiscard.code)}">
+								{tileLabel($gameState.lastDiscard.code)}
+							</div>
+							<span class="claim-from"
+								>discarded by {seatNames[$gameState.lastDiscardSeat ?? 0]}</span
+							>
+						</div>
+					{/if}
+					<div class="claim-actions">
+						{#if $gameState.pendingRon}
+							<button class="claim-btn btn-ron" onclick={declareRon}>Ron 栄和</button>
+						{/if}
+						{#each $gameState.claimOptions ?? [] as option, oi (oi)}
+							{#if option.type === 'pon'}
+								<button class="claim-btn btn-pon" onclick={() => claimPon(option.handTiles)}>
+									Pon ポン
+								</button>
+							{:else if option.type === 'chi'}
+								<button class="claim-btn btn-chi" onclick={() => claimChi(option.handTiles)}>
+									Chi チー
+									<span class="chi-tiles"
+										>{tileLabel(option.handTiles[0].code)}·{tileLabel(
+											option.handTiles[1].code
+										)}</span
+									>
+								</button>
+							{/if}
+						{/each}
+						<button class="claim-btn btn-pass" onclick={passClaim}>Pass スキップ</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 
 		<!-- Round end overlay -->
 		{#if $gameState.phase === 'round_end'}
@@ -131,7 +224,7 @@
 							{$gameState.roundResult.winType === 'tsumo' ? '自摸' : '栄和'}
 						</div>
 						<p class="winner-name">
-							{SEAT_NAMES[$gameState.roundResult.winner]} wins!
+							{seatNames[$gameState.roundResult.winner]} wins!
 						</p>
 						<p class="score-detail">
 							{$gameState.roundResult.han} han / {$gameState.roundResult.fu} fu —
@@ -140,7 +233,7 @@
 						<div class="score-changes">
 							{#each $gameState.roundResult.pointChanges as change, i (i)}
 								<div class="score-row" class:winner={$gameState.roundResult.winner === i}>
-									<span>{SEAT_NAMES[i]}</span>
+									<span>{seatNames[i]}</span>
 									<span class:positive={change > 0} class:negative={change < 0}>
 										{change > 0 ? '+' : ''}{change.toLocaleString()}
 									</span>
@@ -167,7 +260,7 @@
 							.map((p, i) => ({ ...p, seat: i }))
 							.sort((a, b) => b.score - a.score) as player, rank (player.seat)}
 							<div class="score-row" class:winner={rank === 0}>
-								<span>#{rank + 1} {SEAT_NAMES[player.seat]}</span>
+								<span>#{rank + 1} {seatNames[player.seat]}</span>
 								<span>{player.score.toLocaleString()}</span>
 							</div>
 						{/each}
@@ -274,6 +367,21 @@
 		margin-bottom: 0.4rem;
 	}
 
+	.meld-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		margin-bottom: 0.4rem;
+	}
+
+	.meld-group {
+		display: flex;
+		gap: 1px;
+		background: #222;
+		border-radius: 3px;
+		padding: 2px;
+	}
+
 	.discard-row {
 		display: flex;
 		flex-wrap: wrap;
@@ -325,11 +433,31 @@
 		min-height: 28px;
 	}
 
+	.player-hand-row {
+		display: flex;
+		align-items: flex-end;
+		gap: 1rem;
+		flex-wrap: wrap;
+		margin-bottom: 0.5rem;
+	}
+
 	.player-hand {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 4px;
-		margin-bottom: 0.5rem;
+	}
+
+	.player-melds {
+		display: flex;
+		gap: 6px;
+		align-items: flex-end;
+	}
+
+	.player-actions {
+		min-height: 2rem;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 	}
 
 	/* Tile styles */
@@ -381,6 +509,14 @@
 		border-color: #c41e3a;
 	}
 
+	.tile-large.riichi-trigger {
+		border-color: #c8a020;
+	}
+
+	.tile-large.riichi-trigger:hover {
+		border-color: #f0c030;
+	}
+
 	/* Suit colours */
 	.tile-man {
 		color: #e05050;
@@ -404,11 +540,10 @@
 	.action-hint {
 		font-size: 0.8rem;
 		color: #555;
-		margin: 0.25rem 0;
+		margin: 0;
 	}
 
 	.action-btn {
-		margin-top: 0.75rem;
 		padding: 0.5rem 1.5rem;
 		background: #c41e3a;
 		color: #fff;
@@ -424,8 +559,97 @@
 		background: #a01830;
 	}
 
-	.ron-btn {
-		margin-left: 0.5rem;
+	.tsumo-btn {
+		background: #1a7a3a;
+	}
+
+	.tsumo-btn:hover {
+		background: #155f2d;
+	}
+
+	/* Claim card */
+	.claim-card {
+		background: #181818;
+		border: 1px solid #333;
+		border-radius: 8px;
+		padding: 1.5rem 2rem;
+		text-align: center;
+		min-width: 300px;
+	}
+
+	.claim-title {
+		font-size: 0.8rem;
+		color: #888;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 1rem;
+	}
+
+	.claim-tile-display {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.4rem;
+		margin-bottom: 1.25rem;
+	}
+
+	.claim-from {
+		font-size: 0.75rem;
+		color: #666;
+	}
+
+	.claim-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		justify-content: center;
+	}
+
+	.claim-btn {
+		padding: 0.5rem 1rem;
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 0.9rem;
+		font-weight: 600;
+		transition: opacity 0.15s;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.15rem;
+	}
+
+	.claim-btn:hover {
+		opacity: 0.85;
+	}
+
+	.btn-ron {
+		background: #c41e3a;
+		color: #fff;
+		min-width: 80px;
+	}
+
+	.btn-pon {
+		background: #b87820;
+		color: #fff;
+		min-width: 80px;
+	}
+
+	.btn-chi {
+		background: #1a6e30;
+		color: #fff;
+		min-width: 80px;
+	}
+
+	.chi-tiles {
+		font-size: 0.7rem;
+		opacity: 0.85;
+	}
+
+	.btn-pass {
+		background: #333;
+		color: #aaa;
+		min-width: 80px;
 	}
 
 	/* Overlay */
