@@ -48,6 +48,11 @@ export interface RoundResult {
 	pointChanges: [number, number, number, number];
 }
 
+export interface ExhaustiveDrawResult {
+	tenpaiSeats: Seat[];
+	pointChanges: [number, number, number, number];
+}
+
 export interface GameState {
 	phase: GamePhase;
 	round: number;
@@ -76,4 +81,5 @@ export interface GameState {
 	claimOptions: ClaimOption[] | null; // pon/chi options during claim_decision
 
 	roundResult: RoundResult | null;
+	exhaustiveDrawResult: ExhaustiveDrawResult | null;
 }
