@@ -24,6 +24,8 @@ export interface PlayerState {
 	difficulty: AiDifficulty | null;
 	isRiichi: boolean;
 	riichiTile: GameTile | null;
+	isFuriten: boolean; // own-discard furiten — any wait tile appears in own discards
+	isTempFuriten: boolean; // passed on a ron opportunity; clears after next discard (unless in riichi)
 }
 
 export type GamePhase =
