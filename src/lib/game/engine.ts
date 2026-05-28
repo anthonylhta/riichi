@@ -351,9 +351,7 @@ function drawRinshan(state: GameState, seat: Seat): GameState {
 	const newDoraIdx = 4 + state.doraIndicators.length;
 	const newUraDoraIdx = 9 + state.uraDoraIndicators.length;
 	const newDoraIndicators =
-		newDoraIdx < 9
-			? [...state.doraIndicators, state.deadWall[newDoraIdx]]
-			: state.doraIndicators;
+		newDoraIdx < 9 ? [...state.doraIndicators, state.deadWall[newDoraIdx]] : state.doraIndicators;
 	const newUraDoraIndicators =
 		newUraDoraIdx < state.deadWall.length
 			? [...state.uraDoraIndicators, state.deadWall[newUraDoraIdx]]
@@ -681,8 +679,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		const players = clonePlayers(s);
 		players[seat].isRiichi = true;
 		players[seat].isIppatsu = true;
-		players[seat].isDoubleRiichi =
-			s.players[seat].discards.length === 0 && !s.anyCallMadeThisRound;
+		players[seat].isDoubleRiichi = s.players[seat].discards.length === 0 && !s.anyCallMadeThisRound;
 		players[seat].score -= 1000;
 		s = { ...s, players };
 	}
