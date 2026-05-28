@@ -24,7 +24,9 @@ function makePlayer(seat: Seat): PlayerState {
 		isHuman: seat === 0,
 		difficulty: seat === 0 ? null : seat === 3 ? 'good' : 'basic',
 		isRiichi: false,
-		riichiTile: null
+		riichiTile: null,
+		isFuriten: false,
+		isTempFuriten: false
 	};
 }
 
@@ -315,7 +317,7 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 		players[0].score -= 1000;
 	}
 
-	const newState: GameState = {
+	const postDiscard: GameState = {
 		...state,
 		players,
 		lastDiscard: tile,
@@ -326,6 +328,15 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 		pendingRon: null,
 		claimOptions: null
 	};
+
+	// Recompute furiten flags after the discard
+	const furitenPlayers = clonePlayers(postDiscard);
+	furitenPlayers[0].isFuriten = await computeOwnDiscardFuriten(postDiscard, 0);
+	// Temp furiten clears after discard, unless in riichi (riichi furiten is permanent)
+	if (!furitenPlayers[0].isRiichi) {
+		furitenPlayers[0].isTempFuriten = false;
+	}
+	const newState = { ...postDiscard, players: furitenPlayers };
 
 	for (let s = 1; s < 4; s++) {
 		const ron = await checkRon(newState, s as Seat, tile, 0);
@@ -416,7 +427,14 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 	if (state.phase !== 'claim_decision') return state;
 
 	const nextSeat = (((state.lastDiscardSeat ?? 0) + 1) % 4) as Seat;
-	const cleared = { ...state, pendingRon: null, claimOptions: null };
+
+	// Passing on an available ron sets temp furiten (permanent if already in riichi)
+	const players = clonePlayers(state);
+	if (state.pendingRon !== null) {
+		players[0].isTempFuriten = true;
+	}
+
+	const cleared = { ...state, players, pendingRon: null, claimOptions: null };
 
 	if (nextSeat === 0) {
 		const drawn = drawTile({ ...cleared, phase: 'ai_turn' }, 0);
@@ -459,7 +477,10 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	};
 
 	// Check all human claim options: ron, pon, chi
-	const humanRon = await checkRon(s, 0, discardTile, seat);
+	// Ron is blocked if player is in any form of furiten
+	const humanPlayer = s.players[0];
+	const inFuriten = humanPlayer.isFuriten || humanPlayer.isTempFuriten;
+	const humanRon = inFuriten ? null : await checkRon(s, 0, discardTile, seat);
 	const claimOptions = getHumanClaimOptions(s, discardTile, seat);
 
 	if (humanRon || claimOptions.length > 0) {
@@ -507,6 +528,28 @@ function clonePlayers(state: GameState): [PlayerState, PlayerState, PlayerState,
 		...p,
 		hand: [...p.hand],
 		discards: [...p.discards],
-		melds: [...p.melds]
+		melds: [...p.melds],
+		isFuriten: p.isFuriten,
+		isTempFuriten: p.isTempFuriten
 	})) as [PlayerState, PlayerState, PlayerState, PlayerState];
+}
+
+async function computeOwnDiscardFuriten(state: GameState, seat: Seat): Promise<boolean> {
+	const player = state.players[seat];
+	if (player.discards.length === 0) return false;
+	const uniqueCodes = [...new Set(player.discards.map((t) => t.code))];
+	for (const code of uniqueCodes) {
+		const result = await checkWin({
+			handCodes: [...player.hand.map((t) => t.code), code],
+			openMelds: openMeldsFor(player),
+			doraIndicators: state.doraIndicators,
+			isRiichi: player.isRiichi,
+			isTsumo: false,
+			ronTileCode: code,
+			seatWind: getSeatWind(seat, state.dealer),
+			roundWind: getRoundWind()
+		});
+		if (result.isWin) return true;
+	}
+	return false;
 }
