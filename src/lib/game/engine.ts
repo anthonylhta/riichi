@@ -273,13 +273,13 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		lastDiscard: discardTile,
 		lastDiscardSeat: seat,
 		currentSeat: nextSeat,
-		phase: nextSeat === 0 ? 'player_discard' : 'ai_turn'
+		phase: 'ai_turn'
 	};
 
-	// Check if human can ron
+	// Check if human can ron on this discard
 	const humanRon = await checkRon(s, 0, discardTile, seat);
 	if (humanRon) {
-		// Don't auto-win for human — let UI present the option
+		// Don't auto-win — let UI present the option
 		return { ...s, phase: 'player_discard' };
 	}
 
@@ -289,6 +289,11 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		if (state.players[claimant].isHuman) continue;
 		const ron = await checkRon(s, claimant as Seat, discardTile, seat);
 		if (ron) return applyRoundResult(s, ron);
+	}
+
+	// No ron — draw tile for player if it's their turn next
+	if (nextSeat === 0) {
+		return drawTile(s, 0);
 	}
 
 	return s;
