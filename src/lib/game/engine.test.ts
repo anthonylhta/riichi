@@ -63,6 +63,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		wallPos: 0,
 		deadWall,
 		rinshankPos: 0,
+		riichiBets: 0,
 		doraIndicators: [tile(1, 100)],
 		uraDoraIndicators: [tile(2, 101)],
 		anyCallMadeThisRound: false,
