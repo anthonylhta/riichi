@@ -79,6 +79,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
+		exhaustiveDrawResult: null,
 		...overrides
 	};
 }

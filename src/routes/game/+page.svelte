@@ -321,6 +321,25 @@
 					{:else}
 						<div class="win-announcement">流局</div>
 						<p class="winner-name">Draw — wall exhausted</p>
+						{#if $gameState.exhaustiveDrawResult}
+							{@const edr = $gameState.exhaustiveDrawResult}
+							<div class="score-changes">
+								{#each edr.pointChanges as change, i (i)}
+									{@const isTenpai = edr.tenpaiSeats.includes(i as 0 | 1 | 2 | 3)}
+									<div class="score-row" class:tenpai={isTenpai}>
+										<span>
+											{seatNames[i]}
+											<span class="tenpai-label">
+												{isTenpai ? 'tenpai' : 'noten'}
+											</span>
+										</span>
+										<span class:positive={change > 0} class:negative={change < 0}>
+											{change > 0 ? '+' : ''}{change !== 0 ? change.toLocaleString() : '—'}
+										</span>
+									</div>
+								{/each}
+							</div>
+						{/if}
 					{/if}
 					<button class="action-btn" onclick={nextRound}>Next Round</button>
 				</div>
@@ -807,6 +826,18 @@
 	.score-row.winner {
 		color: #e8e0d5;
 		font-weight: 600;
+	}
+
+	.score-row.tenpai {
+		color: #e8e0d5;
+	}
+
+	.tenpai-label {
+		font-size: 0.75rem;
+		margin-left: 0.4rem;
+		opacity: 0.6;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 
 	.positive {

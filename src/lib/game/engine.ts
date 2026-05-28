@@ -1,6 +1,14 @@
 import { createWall, shuffleTiles, TC } from './tiles';
 import type { GameTile, TileCode } from './tiles';
-import type { ClaimOption, GameState, Meld, PlayerState, RoundResult, Seat } from './types';
+import type {
+	ClaimOption,
+	ExhaustiveDrawResult,
+	GameState,
+	Meld,
+	PlayerState,
+	RoundResult,
+	Seat
+} from './types';
 import { chooseDiscard, getShanten, shouldDeclareRiichi } from './ai';
 import { checkWin } from './scoring';
 
@@ -90,7 +98,8 @@ function initRound(
 		pendingTsumo: null,
 		pendingRon: null,
 		claimOptions: null,
-		roundResult: null
+		roundResult: null,
+		exhaustiveDrawResult: null
 	};
 
 	return drawTile(state, dealer);
@@ -129,9 +138,39 @@ export function continueGame(state: GameState): GameState {
 	return initRound(scores, nextDealer, nextRound, nextHonba, carryBets);
 }
 
+function applyExhaustiveDraw(state: GameState): GameState {
+	const tenpaiSeats: Seat[] = [];
+	for (let seat = 0; seat < 4; seat++) {
+		const handCodes = state.players[seat].hand.map((t) => t.code);
+		if (getShanten(handCodes) === 0) {
+			tenpaiSeats.push(seat as Seat);
+		}
+	}
+
+	const tenpaiCount = tenpaiSeats.length;
+	const notenCount = 4 - tenpaiCount;
+	const pointChanges: [number, number, number, number] = [0, 0, 0, 0];
+
+	if (tenpaiCount > 0 && tenpaiCount < 4) {
+		const tenpaiGain = 3000 / tenpaiCount;
+		const notenLoss = 3000 / notenCount;
+		for (let seat = 0; seat < 4; seat++) {
+			pointChanges[seat] = tenpaiSeats.includes(seat as Seat) ? tenpaiGain : -notenLoss;
+		}
+	}
+
+	const players = clonePlayers(state);
+	for (let i = 0; i < 4; i++) {
+		players[i].score += pointChanges[i];
+	}
+
+	const exhaustiveDrawResult: ExhaustiveDrawResult = { tenpaiSeats, pointChanges };
+	return { ...state, players, phase: 'round_end', roundResult: null, exhaustiveDrawResult };
+}
+
 function drawTile(state: GameState, seat: Seat): GameState {
 	if (state.wallPos >= state.liveWall.length) {
-		return { ...state, phase: 'round_end', roundResult: null };
+		return applyExhaustiveDraw(state);
 	}
 
 	const tile = state.liveWall[state.wallPos];
@@ -345,7 +384,7 @@ function getKakanOptions(player: PlayerState): { meldIndex: number; code: TileCo
 
 function drawRinshan(state: GameState, seat: Seat): GameState {
 	if (state.rinshankPos >= 4) {
-		return { ...state, phase: 'round_end', roundResult: null };
+		return applyExhaustiveDraw(state);
 	}
 
 	const tile = state.deadWall[state.rinshankPos];
