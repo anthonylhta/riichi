@@ -36,7 +36,8 @@ function initRound(
 	scores: [number, number, number, number],
 	dealer: Seat,
 	round: number,
-	honba: number
+	honba: number,
+	riichiBets = 0
 ): GameState {
 	const shuffled = shuffleTiles(createWall());
 
@@ -82,6 +83,7 @@ function initRound(
 		doraIndicators,
 		uraDoraIndicators,
 		anyCallMadeThisRound: false,
+		riichiBets,
 		players,
 		lastDiscard: null,
 		lastDiscardSeat: null,
@@ -122,7 +124,9 @@ export function continueGame(state: GameState): GameState {
 	}
 
 	const scores = state.players.map((p) => p.score) as [number, number, number, number];
-	return initRound(scores, nextDealer, nextRound, nextHonba);
+	// Carry riichi sticks over on exhaustive draw; they clear when someone wins
+	const carryBets = result === null ? state.riichiBets : 0;
+	return initRound(scores, nextDealer, nextRound, nextHonba, carryBets);
 }
 
 function drawTile(state: GameState, seat: Seat): GameState {
@@ -261,7 +265,8 @@ export function applyRoundResult(state: GameState, result: RoundResult): GameSta
 	for (let i = 0; i < 4; i++) {
 		players[i].score += result.pointChanges[i];
 	}
-	return { ...state, players, roundResult: result, phase: 'round_end' };
+	players[result.winner].score += state.riichiBets * 1000;
+	return { ...state, players, roundResult: result, phase: 'round_end', riichiBets: 0 };
 }
 
 function getPonOption(hand: GameTile[], calledTile: GameTile): ClaimOption | null {
@@ -424,6 +429,7 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 	const postDiscard: GameState = {
 		...state,
 		players,
+		riichiBets: canDeclareRiichi ? state.riichiBets + 1 : state.riichiBets,
 		lastDiscard: tile,
 		lastDiscardSeat: 0,
 		phase: 'ai_turn',
@@ -681,7 +687,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		players[seat].isIppatsu = true;
 		players[seat].isDoubleRiichi = s.players[seat].discards.length === 0 && !s.anyCallMadeThisRound;
 		players[seat].score -= 1000;
-		s = { ...s, players };
+		s = { ...s, players, riichiBets: s.riichiBets + 1 };
 	}
 
 	const discardTile = chooseDiscard(seat, s);
