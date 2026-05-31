@@ -23,6 +23,9 @@
 
 	let selectedTileId = $state<number | null>(null);
 	let riichiArmed = $state(false);
+	// Hovering a hand tile lights up every matching tile in the rivers and your own
+	// discards — a reading aid (and furiten cue: a wait you've already discarded).
+	let hoveredCode = $state<number | null>(null);
 
 	onMount(async () => {
 		await startGame();
@@ -137,7 +140,12 @@
 	<div class="pond-wrap">
 		<div class="pond">
 			{#each p.discards as t, di (t.id)}
-				<Tile tile={t} variant="pond" recent={p.isRiichi ? false : di === p.discards.length - 1} />
+				<Tile
+					tile={t}
+					variant="pond"
+					recent={p.isRiichi ? false : di === p.discards.length - 1}
+					highlight={hoveredCode === t.code}
+				/>
 			{/each}
 		</div>
 	</div>
@@ -234,6 +242,7 @@
 								recent={$gameState.players[0].isRiichi
 									? false
 									: di === $gameState.players[0].discards.length - 1}
+								highlight={hoveredCode === t.code}
 							/>
 						{/each}
 					</div>
@@ -255,7 +264,10 @@
 							disabled={$gameState.phase !== 'player_discard' ||
 								(riichiActive && !wouldTriggerRiichi(t.id))}
 							riichiTrigger={riichiActive && wouldTriggerRiichi(t.id)}
+							highlight={hoveredCode === t.code}
 							onclick={() => handleTileClick(t.id)}
+							onmouseenter={() => (hoveredCode = t.code)}
+							onmouseleave={() => (hoveredCode = null)}
 						/>
 					{/each}
 				</div>

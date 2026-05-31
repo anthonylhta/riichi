@@ -16,7 +16,9 @@
 		dimmed = false,
 		recent = false,
 		rotated = false,
-		onclick = undefined
+		onclick = undefined,
+		onmouseenter = undefined,
+		onmouseleave = undefined
 	}: {
 		tile?: GameTile | null;
 		variant?: Variant;
@@ -30,6 +32,8 @@
 		recent?: boolean;
 		rotated?: boolean;
 		onclick?: (() => void) | undefined;
+		onmouseenter?: (() => void) | undefined;
+		onmouseleave?: (() => void) | undefined;
 	} = $props();
 
 	// Per-tile colour: number suits by colour, dragons split (white/green/red).
@@ -56,6 +60,8 @@
 			class:red={tile.isRed}
 			{disabled}
 			{onclick}
+			{onmouseenter}
+			{onmouseleave}
 		>
 			<span class="label">{tileLabel(tile.code)}</span>
 		</button>
@@ -201,10 +207,14 @@
 		cursor: default;
 	}
 
-	/* Matching-tile highlight hooks (wired in a later phase) */
+	/* Matching-tile highlight — same tile elsewhere on the table lights up */
 	.highlight {
-		outline: 2px solid #c8a020;
+		position: relative;
+		outline: 2px solid #f0c842;
 		outline-offset: 1px;
+		box-shadow: 0 0 8px rgba(240, 200, 66, 0.6);
+		z-index: 2;
+		filter: brightness(1.12);
 	}
 	.dimmed {
 		filter: brightness(0.62) saturate(0.7);
