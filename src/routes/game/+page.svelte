@@ -21,6 +21,7 @@
 	import { getPlayerKanOptions } from '$lib/game/engine';
 
 	let selectedTileId = $state<number | null>(null);
+	let riichiArmed = $state(false);
 
 	onMount(async () => {
 		await startGame();
@@ -28,9 +29,11 @@
 
 	async function handleTileClick(tileId: number) {
 		if (!$gameState || $gameState.phase !== 'player_discard') return;
+		const declaring = riichiActive && wouldTriggerRiichi(tileId);
 		selectedTileId = tileId;
-		await discard(tileId);
+		await discard(tileId, declaring);
 		selectedTileId = null;
+		riichiArmed = false;
 	}
 
 	function wouldTriggerRiichi(tileId: number): boolean {
@@ -38,6 +41,20 @@
 		if (!player || player.isRiichi || player.melds.length > 0) return false;
 		return isTenpaiAfterDiscard(player.hand, tileId);
 	}
+
+	// Riichi is opt-in: shown only when it is legal to declare (closed hand, 1000+
+	// points, and at least one discard keeps the hand tenpai).
+	let canRiichi = $derived(
+		$gameState?.phase === 'player_discard' &&
+			$gameState.currentSeat === 0 &&
+			!$gameState.players[0].isRiichi &&
+			$gameState.players[0].melds.length === 0 &&
+			$gameState.players[0].score >= 1000 &&
+			$gameState.players[0].hand.some((t) => wouldTriggerRiichi(t.id))
+	);
+	// Armed only counts while declaring is actually legal, so a stale armed flag
+	// (e.g. after an intervening claim) never blocks normal discards.
+	let riichiActive = $derived(riichiArmed && canRiichi);
 
 	const WIND_NAMES = ['East', 'South', 'West', 'North'];
 	const ROUND_NAMES = ['East 1', 'East 2', 'East 3', 'East 4'];
@@ -207,10 +224,11 @@
 							class="tile tile-large tile-{suitClass(tile.code)}"
 							class:tile-red={tile.isRed}
 							class:selected={selectedTileId === tile.id}
-							class:clickable={$gameState.phase === 'player_discard'}
-							class:riichi-trigger={$gameState.phase === 'player_discard' &&
-								wouldTriggerRiichi(tile.id)}
-							disabled={$gameState.phase !== 'player_discard'}
+							class:clickable={$gameState.phase === 'player_discard' &&
+								!(riichiActive && !wouldTriggerRiichi(tile.id))}
+							class:riichi-trigger={riichiActive && wouldTriggerRiichi(tile.id)}
+							disabled={$gameState.phase !== 'player_discard' ||
+								(riichiActive && !wouldTriggerRiichi(tile.id))}
 							onclick={() => handleTileClick(tile.id)}
 						>
 							{tileLabel(tile.code)}
@@ -241,10 +259,23 @@
 					{#if $gameState.pendingTsumo}
 						<button class="action-btn tsumo-btn" onclick={declareTsumo}>Tsumo 自摸</button>
 					{:else}
+						{#if canRiichi}
+							<button
+								class="action-btn riichi-btn"
+								class:armed={riichiActive}
+								onclick={() => (riichiArmed = !riichiArmed)}
+							>
+								{riichiActive ? 'Cancel' : 'Riichi 立直'}
+							</button>
+						{/if}
 						<p class="action-hint">
-							Click a tile to discard{$gameState.players[0].isRiichi
-								? ' (Riichi — draw tile only)'
-								: ''}
+							{#if $gameState.players[0].isRiichi}
+								Click a tile to discard (Riichi — draw tile only)
+							{:else if riichiActive}
+								Declaring riichi — click a highlighted tile
+							{:else}
+								Click a tile to discard
+							{/if}
 						</p>
 					{/if}
 					{#each kanOptions.ankan as code (code)}
@@ -700,6 +731,20 @@
 
 	.kan-btn:hover {
 		background: #3a2060;
+	}
+
+	.riichi-btn {
+		background: #c8a020;
+		color: #1a1a1a;
+	}
+
+	.riichi-btn:hover {
+		background: #b08c18;
+	}
+
+	.riichi-btn.armed {
+		background: #f0c030;
+		box-shadow: 0 0 0 2px #f0c030;
 	}
 
 	/* Claim card */

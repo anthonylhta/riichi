@@ -253,12 +253,12 @@ describe('humanPassClaim', () => {
 
 // ─── humanDiscard (riichi auto-declare) ──────────────────────────────────────
 
-describe('humanDiscard — riichi auto-declare', () => {
+describe('humanDiscard — riichi opt-in', () => {
 	beforeEach(() => {
 		vi.mocked(getShanten).mockReturnValue(8); // default: not tenpai
 	});
 
-	it('auto-declares riichi when discarding to tenpai with a closed hand', async () => {
+	it('declares riichi when the flag is set and the discard reaches tenpai (closed hand)', async () => {
 		vi.mocked(getShanten).mockReturnValue(0); // tenpai after discard
 
 		const hand = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((code, i) => tile(code, i + 1));
@@ -274,11 +274,57 @@ describe('humanDiscard — riichi auto-declare', () => {
 			] as GameState['players']
 		});
 
-		const result = await humanDiscard(state, discard.id);
+		const result = await humanDiscard(state, discard.id, true);
 
 		expect(result.players[0].isRiichi).toBe(true);
 		expect(result.players[0].riichiTile).toEqual(discard);
 		expect(result.players[0].score).toBe(24000); // -1000 riichi bet
+	});
+
+	it('stays in quiet tenpai when discarding to tenpai without the riichi flag', async () => {
+		vi.mocked(getShanten).mockReturnValue(0); // tenpai after discard
+
+		const hand = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((code, i) => tile(code, i + 1));
+		const discard = hand[12];
+
+		const state = makeState({
+			phase: 'player_discard',
+			players: [
+				makePlayer(0, { hand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, discard.id); // declareRiichi defaults to false
+
+		expect(result.players[0].isRiichi).toBe(false);
+		expect(result.players[0].riichiTile).toBe(null);
+		expect(result.players[0].score).toBe(25000); // no bet taken
+		expect(result.riichiBets).toBe(0);
+	});
+
+	it('does not declare riichi with fewer than 1000 points', async () => {
+		vi.mocked(getShanten).mockReturnValue(0);
+
+		const hand = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((code, i) => tile(code, i + 1));
+		const discard = hand[12];
+
+		const state = makeState({
+			phase: 'player_discard',
+			players: [
+				makePlayer(0, { hand, score: 500 }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, discard.id, true);
+
+		expect(result.players[0].isRiichi).toBe(false);
+		expect(result.players[0].score).toBe(500); // unchanged
 	});
 
 	it('does not declare riichi with an open hand (melds present)', async () => {
@@ -302,7 +348,7 @@ describe('humanDiscard — riichi auto-declare', () => {
 			] as GameState['players']
 		});
 
-		const result = await humanDiscard(state, discard.id);
+		const result = await humanDiscard(state, discard.id, true);
 
 		expect(result.players[0].isRiichi).toBe(false);
 		expect(result.players[0].score).toBe(25000);
@@ -324,7 +370,7 @@ describe('humanDiscard — riichi auto-declare', () => {
 			] as GameState['players']
 		});
 
-		const result = await humanDiscard(state, discard.id);
+		const result = await humanDiscard(state, discard.id, true);
 
 		expect(result.players[0].isRiichi).toBe(true); // unchanged
 		expect(result.players[0].score).toBe(25000); // no additional bet
