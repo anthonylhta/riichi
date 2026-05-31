@@ -569,18 +569,26 @@ async function applyAiCalls(
 	return state;
 }
 
-export async function humanDiscard(state: GameState, tileId: number): Promise<GameState> {
+export async function humanDiscard(
+	state: GameState,
+	tileId: number,
+	declareRiichi = false
+): Promise<GameState> {
 	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return state;
 
 	const player = state.players[0];
 	const tile = player.hand.find((t) => t.id === tileId);
 	if (!tile) return state;
 
-	// Only auto-declare riichi on a closed hand
+	// Riichi is opt-in: the player must explicitly request it, and it is only legal
+	// from a closed hand with 1000+ points that stays tenpai after this discard.
+	// Without the flag the player simply discards and stays in quiet tenpai.
 	const canDeclareRiichi =
 		!player.isRiichi &&
 		player.melds.length === 0 &&
+		player.score >= 1000 &&
 		getShanten(player.hand.filter((t) => t.id !== tileId).map((t) => t.code)) === 0;
+	const willDeclareRiichi = declareRiichi && canDeclareRiichi;
 
 	const players = clonePlayers(state);
 	players[0].hand = sortHand(player.hand.filter((t) => t.id !== tileId));
@@ -591,7 +599,7 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 		players[0].isIppatsu = false;
 	}
 
-	if (canDeclareRiichi) {
+	if (willDeclareRiichi) {
 		players[0].isRiichi = true;
 		players[0].isIppatsu = true;
 		players[0].isDoubleRiichi = player.discards.length === 0 && !state.anyCallMadeThisRound;
@@ -602,7 +610,7 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 	const postDiscard: GameState = {
 		...state,
 		players,
-		riichiBets: canDeclareRiichi ? state.riichiBets + 1 : state.riichiBets,
+		riichiBets: willDeclareRiichi ? state.riichiBets + 1 : state.riichiBets,
 		lastDiscard: tile,
 		lastDiscardSeat: 0,
 		phase: 'ai_turn',
