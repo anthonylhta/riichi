@@ -228,9 +228,11 @@ describe('humanDeclareRon', () => {
 
 describe('humanPassClaim', () => {
 	it('advances to the next AI seat when player is not next to draw', async () => {
-		// lastDiscardSeat=1 → nextSeat=2, no player draw, no checkTsumo call
+		// lastDiscardSeat=1 → nextSeat=2, no player draw, no checkTsumo call.
+		// AI seats hold empty hands, so no AI claims the discard.
 		const state = makeState({
 			phase: 'claim_decision',
+			lastDiscard: tile(5, 50),
 			lastDiscardSeat: 1,
 			pendingRon: null,
 			claimOptions: []
@@ -242,6 +244,35 @@ describe('humanPassClaim', () => {
 		expect(result.currentSeat).toBe(2);
 		expect(result.pendingRon).toBeNull();
 		expect(result.claimOptions).toBeNull();
+	});
+
+	it('lets an AI pon the discard the human passed on', async () => {
+		// Seat 2 holds two matching tiles for the discarded 23; passing must not
+		// forfeit that pon — applyAiCalls should fire and seat 2 becomes current.
+		vi.mocked(getShanten).mockReturnValue(8); // not tenpai → AI is willing to pon
+		const discarded = tile(23, 50);
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: discarded,
+			lastDiscardSeat: 1,
+			pendingRon: null,
+			claimOptions: [],
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: [tile(23, 60), tile(23, 61), tile(9, 62)] }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanPassClaim(state);
+
+		expect(result.phase).toBe('ai_turn');
+		expect(result.currentSeat).toBe(2);
+		expect(result.anyCallMadeThisRound).toBe(true);
+		expect(result.players[2].melds).toHaveLength(1);
+		expect(result.players[2].melds[0].type).toBe('pon');
+		expect(result.players[2].melds[0].tiles).toEqual([tile(23, 60), tile(23, 61), discarded]);
 	});
 
 	it('returns state unchanged when not in claim_decision', async () => {
@@ -347,6 +378,7 @@ describe('furiten', () => {
 
 		const state = makeState({
 			phase: 'claim_decision',
+			lastDiscard: tile(5, 50),
 			lastDiscardSeat: 1,
 			pendingRon,
 			claimOptions: []
@@ -360,6 +392,7 @@ describe('furiten', () => {
 	it('does not set isTempFuriten when passing with no ron available', async () => {
 		const state = makeState({
 			phase: 'claim_decision',
+			lastDiscard: tile(7, 50),
 			lastDiscardSeat: 1,
 			pendingRon: null,
 			claimOptions: [{ type: 'pon', handTiles: [tile(5, 1), tile(5, 2)] }]

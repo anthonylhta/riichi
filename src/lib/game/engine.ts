@@ -783,8 +783,11 @@ export function getPlayerKanOptions(state: GameState): {
 
 export async function humanPassClaim(state: GameState): Promise<GameState> {
 	if (state.phase !== 'claim_decision') return state;
+	if (!state.lastDiscard || state.lastDiscardSeat === null) return state;
 
-	const nextSeat = (((state.lastDiscardSeat ?? 0) + 1) % 4) as Seat;
+	const discardTile = state.lastDiscard;
+	const discarderSeat = state.lastDiscardSeat;
+	const nextSeat = ((discarderSeat + 1) % 4) as Seat;
 
 	// Passing on an available ron sets temp furiten (permanent if already in riichi)
 	const players = clonePlayers(state);
@@ -792,15 +795,34 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 		players[0].isTempFuriten = true;
 	}
 
-	const cleared = { ...state, players, pendingRon: null, claimOptions: null };
+	const cleared: GameState = {
+		...state,
+		players,
+		phase: 'ai_turn',
+		pendingRon: null,
+		claimOptions: null
+	};
 
+	// runAiTurn hands the decision to the human *before* it checks AI claims, so a
+	// human pass must not silently forfeit them. Resolve the AI's claim on this same
+	// discard in priority order — ron first, then pon/chi/daiminkan — before advancing.
+	for (let claimant = 1; claimant < 4; claimant++) {
+		if (claimant === discarderSeat) continue;
+		const ron = await checkRon(cleared, claimant as Seat, discardTile, discarderSeat);
+		if (ron) return applyRoundResult(cleared, ron);
+	}
+
+	const afterAiCalls = await applyAiCalls(cleared, discardTile, discarderSeat);
+	if (afterAiCalls !== cleared) return afterAiCalls;
+
+	// No AI claimed — advance normally.
 	if (nextSeat === 0) {
-		const drawn = drawTile({ ...cleared, phase: 'ai_turn' }, 0);
+		const drawn = drawTile(cleared, 0);
 		const tsumo = await checkTsumo(drawn, 0);
 		return { ...drawn, pendingTsumo: tsumo };
 	}
 
-	return { ...cleared, phase: 'ai_turn', currentSeat: nextSeat };
+	return { ...cleared, currentSeat: nextSeat };
 }
 
 export async function runAiTurn(state: GameState): Promise<GameState> {
