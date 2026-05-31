@@ -53,11 +53,11 @@ export async function startGame() {
 	}
 }
 
-export async function discard(tileId: number) {
+export async function discard(tileId: number, declareRiichi = false) {
 	const current = get(gameState);
 	if (!current) return;
 	try {
-		const next = await humanDiscard(current, tileId);
+		const next = await humanDiscard(current, tileId, declareRiichi);
 		gameState.set(next);
 		if (next.phase === 'ai_turn') {
 			await runUntilPlayerTurn(next);
