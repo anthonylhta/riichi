@@ -23,11 +23,17 @@ interface WinCheckInput {
 	roundWind: TileCode;
 }
 
+export interface Yaku {
+	name: string;
+	han: number;
+}
+
 export interface WinResult {
 	isWin: boolean;
 	han: number;
 	fu: number;
 	score: number;
+	yaku: Yaku[];
 	yakuNames: string[];
 }
 
@@ -129,21 +135,38 @@ export async function checkWin(input: WinCheckInput): Promise<WinResult> {
 		});
 
 		if (!result.is_agari) {
-			return { isWin: false, han: 0, fu: 0, score: 0, yakuNames: [] };
+			return { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
 		}
 
-		const yakuNames = Object.entries(result.yaku as Record<string, number>)
-			.map(([id]) => YAKU_NAMES[id] ?? `Yaku ${id}`)
-			.filter(Boolean);
+		// riichi-rs returns `yaku` as { yakuId: han }; keep both the per-yaku han
+		// (for the win breakdown) and the flat name list (legacy callers / tests).
+		const yaku: Yaku[] = Object.entries(result.yaku as Record<string, number>).map(([id, han]) => ({
+			name: YAKU_NAMES[id] ?? `Yaku ${id}`,
+			han
+		}));
 
 		return {
 			isWin: true,
 			han: result.han,
 			fu: result.fu,
 			score: result.ten,
-			yakuNames
+			yaku,
+			yakuNames: yaku.map((y) => y.name)
 		};
 	} catch {
-		return { isWin: false, han: 0, fu: 0, score: 0, yakuNames: [] };
+		return { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
 	}
+}
+
+// Limit-hand label for the win breakdown (Mahjong Soul defaults). Empty string
+// for ordinary hands scored straight off han/fu.
+export function limitName(han: number, fu: number): string {
+	if (han >= 13) return 'Yakuman';
+	if (han >= 11) return 'Sanbaiman';
+	if (han >= 8) return 'Baiman';
+	if (han >= 6) return 'Haneman';
+	if (han >= 5) return 'Mangan';
+	if (han === 4 && fu >= 40) return 'Mangan';
+	if (han === 3 && fu >= 70) return 'Mangan';
+	return '';
 }

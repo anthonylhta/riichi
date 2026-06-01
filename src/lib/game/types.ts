@@ -45,6 +45,7 @@ export interface RoundResult {
 	han: number;
 	fu: number;
 	score: number;
+	yaku: { name: string; han: number }[];
 	pointChanges: [number, number, number, number];
 }
 

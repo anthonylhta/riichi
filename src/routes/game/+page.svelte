@@ -17,6 +17,7 @@
 		passClaim
 	} from '$lib/stores/game';
 	import { tileLabel } from '$lib/game/tiles';
+	import { limitName } from '$lib/game/scoring';
 	import { isTenpaiAfterDiscard } from '$lib/game/ai';
 	import { getPlayerKanOptions } from '$lib/game/engine';
 	import Tile from '$lib/components/Tile.svelte';
@@ -112,8 +113,9 @@
 	);
 </script>
 
-<!-- Opponent seat: wind/name/score chip, concealed hand, melds, discard pond -->
-{#snippet opponentSeat(seat: number)}
+<!-- A seat's hand block: wind/name/score chip, concealed hand, melds.
+     Sits at that seat's outer edge; side seats are oriented vertically via CSS. -->
+{#snippet seatHand(seat: number)}
 	{@const p = $gameState!.players[seat]}
 	<div class="seat-chip" class:active={$gameState!.currentSeat === seat}>
 		<span class="wind-mark">{WIND_KANJI[windIndex(seat, $gameState!.dealer)]}</span>
@@ -137,17 +139,20 @@
 			{/each}
 		</div>
 	{/if}
-	<div class="pond-wrap">
-		<div class="pond">
-			{#each p.discards as t, di (t.id)}
-				<Tile
-					tile={t}
-					variant="pond"
-					recent={p.isRiichi ? false : di === p.discards.length - 1}
-					highlight={hoveredCode === t.code}
-				/>
-			{/each}
-		</div>
+{/snippet}
+
+<!-- A seat's discard river — rings the centre board, rotated to face the seat. -->
+{#snippet seatRiver(seat: number)}
+	{@const p = $gameState!.players[seat]}
+	<div class="pond">
+		{#each p.discards as t, di (t.id)}
+			<Tile
+				tile={t}
+				variant="pond"
+				recent={p.isRiichi ? false : di === p.discards.length - 1}
+				highlight={hoveredCode === t.code}
+			/>
+		{/each}
 	</div>
 {/snippet}
 
@@ -192,38 +197,47 @@
 			</div>
 		{/if}
 
-		<!-- The table: four seats around a central board -->
+		<!-- The table: hands at the four edges, rivers ringing the central board -->
 		<div class="board">
-			<div class="seat seat-top">{@render opponentSeat(2)}</div>
-			<div class="seat seat-left">{@render opponentSeat(3)}</div>
+			<div class="hand-slot hand-top">{@render seatHand(2)}</div>
+			<div class="hand-slot hand-left">{@render seatHand(3)}</div>
 
-			<div class="center-board">
-				<div class="center-round">{WIND_KANJI[0]}{$gameState.round}</div>
-				{#if $gameState.honba > 0}
-					<div class="center-honba">{$gameState.honba} 本場</div>
-				{/if}
-				<div class="center-wall">
-					<span class="wall-num">{$gameState.liveWall.length - $gameState.wallPos}</span>
-					<span class="wall-unit">tiles left</span>
-				</div>
-				<div class="center-dora">
-					<span class="dora-label">ドラ</span>
-					{#each $gameState.doraIndicators as t (t.id)}
-						<Tile tile={t} variant="dora" />
-					{/each}
-				</div>
-				{#if $gameState.riichiBets > 0}
-					<div class="center-sticks">
-						<span class="stick-dot"></span>
-						{$gameState.riichiBets} riichi {$gameState.riichiBets === 1 ? 'stick' : 'sticks'}
+			<!-- Centre cluster: the four rivers hug the central board on each side -->
+			<div class="center-cluster">
+				<div class="river-slot river-top">{@render seatRiver(2)}</div>
+				<div class="river-slot river-left">{@render seatRiver(3)}</div>
+
+				<div class="center-board">
+					<div class="center-round">{WIND_KANJI[0]}{$gameState.round}</div>
+					{#if $gameState.honba > 0}
+						<div class="center-honba">{$gameState.honba} 本場</div>
+					{/if}
+					<div class="center-wall">
+						<span class="wall-num">{$gameState.liveWall.length - $gameState.wallPos}</span>
+						<span class="wall-unit">tiles left</span>
 					</div>
-				{/if}
+					<div class="center-dora">
+						<span class="dora-label">ドラ</span>
+						{#each $gameState.doraIndicators as t (t.id)}
+							<Tile tile={t} variant="dora" />
+						{/each}
+					</div>
+					{#if $gameState.riichiBets > 0}
+						<div class="center-sticks">
+							<span class="stick-dot"></span>
+							{$gameState.riichiBets} riichi {$gameState.riichiBets === 1 ? 'stick' : 'sticks'}
+						</div>
+					{/if}
+				</div>
+
+				<div class="river-slot river-right">{@render seatRiver(1)}</div>
+				<div class="river-slot river-bottom">{@render seatRiver(0)}</div>
 			</div>
 
-			<div class="seat seat-right">{@render opponentSeat(1)}</div>
+			<div class="hand-slot hand-right">{@render seatHand(1)}</div>
 
-			<!-- Bottom: your discard pond + seat chip (hand sits below the table) -->
-			<div class="seat seat-bottom">
+			<!-- Bottom: your seat chip (your face-up hand sits below the table) -->
+			<div class="hand-slot hand-bottom">
 				<div class="seat-chip" class:active={$gameState.currentSeat === 0}>
 					<span class="wind-mark">{WIND_KANJI[windIndex(0, $gameState.dealer)]}</span>
 					<span class="seat-name">{seatNames[0]}</span>
@@ -232,20 +246,6 @@
 					{#if $gameState.players[0].isFuriten || $gameState.players[0].isTempFuriten}
 						<span class="furiten-badge">振聴</span>
 					{/if}
-				</div>
-				<div class="pond-wrap">
-					<div class="pond">
-						{#each $gameState.players[0].discards as t, di (t.id)}
-							<Tile
-								tile={t}
-								variant="pond"
-								recent={$gameState.players[0].isRiichi
-									? false
-									: di === $gameState.players[0].discards.length - 1}
-								highlight={hoveredCode === t.code}
-							/>
-						{/each}
-					</div>
 				</div>
 			</div>
 		</div>
@@ -369,18 +369,32 @@
 			<div class="overlay">
 				<div class="result-card">
 					{#if $gameState.roundResult}
+						{@const rr = $gameState.roundResult}
+						{@const lim = limitName(rr.han, rr.fu)}
 						<div class="win-announcement">
-							{$gameState.roundResult.winType === 'tsumo' ? '自摸' : '栄和'}
+							{rr.winType === 'tsumo' ? '自摸' : '栄和'}
 						</div>
 						<p class="winner-name">
-							{seatNames[$gameState.roundResult.winner]} wins!
+							{seatNames[rr.winner]} wins!
 						</p>
+
+						<!-- Yaku breakdown — which yaku and how the score was built -->
+						<div class="yaku-list">
+							{#each rr.yaku as y (y.name)}
+								<div class="yaku-row">
+									<span class="yaku-name">{y.name}</span>
+									<span class="yaku-han">{y.han} han</span>
+								</div>
+							{/each}
+						</div>
 						<p class="score-detail">
-							{$gameState.roundResult.han} han / {$gameState.roundResult.fu} fu —
-							{$gameState.roundResult.score.toLocaleString()} pts
+							{#if lim}<span class="limit-name">{lim}</span> ·
+							{/if}{rr.han} han / {rr.fu} fu → {rr.score.toLocaleString()} pts
+							<span class="win-type">({rr.winType})</span>
 						</p>
+
 						<div class="score-changes">
-							{#each $gameState.roundResult.pointChanges as change, i (i)}
+							{#each rr.pointChanges as change, i (i)}
 								<div class="score-row" class:winner={$gameState.roundResult.winner === i}>
 									<span>{seatNames[i]}</span>
 									<span class:positive={change > 0} class:negative={change < 0}>
@@ -492,6 +506,8 @@
 	}
 
 	/* ── Table ─────────────────────────────────────────────────────────── */
+	/* Outer grid: each player's hand sits at their own edge; the centre cluster
+	   (rivers ringing the board) fills the middle. */
 	.board {
 		flex: 1;
 		min-height: 0;
@@ -499,12 +515,12 @@
 		max-width: 860px;
 		margin: 0 auto;
 		display: grid;
-		grid-template-columns: minmax(110px, 1fr) minmax(220px, 1.7fr) minmax(110px, 1fr);
-		grid-template-rows: auto minmax(170px, 1fr) auto;
+		grid-template-columns: auto 1fr auto;
+		grid-template-rows: auto 1fr auto;
 		grid-template-areas:
-			'.    top    .'
-			'left center right'
-			'.    bottom .';
+			'.     htop   .'
+			'hleft center hright'
+			'.     hbot   .';
 		gap: 0.5rem;
 		align-items: center;
 		justify-items: center;
@@ -518,27 +534,95 @@
 			inset 0 0 0 1px rgba(255, 255, 255, 0.015);
 	}
 
-	.seat-top {
-		grid-area: top;
+	.hand-top {
+		grid-area: htop;
 	}
-	.seat-left {
-		grid-area: left;
+	.hand-left {
+		grid-area: hleft;
 	}
-	.seat-right {
-		grid-area: right;
+	.hand-right {
+		grid-area: hright;
 	}
-	.seat-bottom {
-		grid-area: bottom;
+	.hand-bottom {
+		grid-area: hbot;
 	}
-	.center-board {
+	.center-cluster {
 		grid-area: center;
 	}
 
-	.seat {
+	.hand-slot {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		gap: 0.3rem;
+	}
+
+	/* Side hands run vertically down their edge: a column of sideways (landscape)
+	   back tiles, so the opponent reads as seated on that side. */
+	.hand-left .concealed,
+	.hand-right .concealed {
+		flex-direction: column;
+		flex-wrap: nowrap;
+		max-width: none;
+	}
+	.hand-left .concealed :global(.tile-back.variant-pond),
+	.hand-right .concealed :global(.tile-back.variant-pond) {
+		width: 28px;
+		height: 20px;
+	}
+
+	/* Side open melds match the vertical hand: groups stack top→down and each tile
+	   is landscape with its glyph rotated to face the centre (no transform on the
+	   tile box, so the column reflows cleanly). */
+	.hand-left .seat-melds,
+	.hand-right .seat-melds {
+		flex-direction: column;
+		flex-wrap: nowrap;
+		align-items: center;
+	}
+	.hand-left .meld-group,
+	.hand-right .meld-group {
+		flex-direction: column;
+	}
+	.hand-left .seat-melds :global(.tile.variant-meld),
+	.hand-right .seat-melds :global(.tile.variant-meld) {
+		width: 32px;
+		height: 24px;
+	}
+	.hand-left .seat-melds :global(.tile.variant-meld .label) {
+		transform: rotate(90deg);
+	}
+	.hand-right .seat-melds :global(.tile.variant-meld .label) {
+		transform: rotate(-90deg);
+	}
+
+	/* Centre cluster: a 3×3 ring of rivers around the central board. */
+	.center-cluster {
+		display: grid;
+		grid-template-columns: auto auto auto;
+		grid-template-rows: auto auto auto;
+		grid-template-areas:
+			'.      rtop   .'
+			'rleft  cboard rright'
+			'.      rbot   .';
+		align-items: center;
+		justify-items: center;
+		gap: 6px;
+	}
+	.river-top {
+		grid-area: rtop;
+	}
+	.river-left {
+		grid-area: rleft;
+	}
+	.river-right {
+		grid-area: rright;
+	}
+	.river-bottom {
+		grid-area: rbot;
+	}
+	.center-board {
+		grid-area: cboard;
 	}
 
 	/* Seat info chip */
@@ -616,13 +700,7 @@
 		padding: 2px;
 	}
 
-	/* Discard pond — 6 per row, oriented toward the centre per seat */
-	.pond-wrap {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
+	/* Discard pond — 6 per row, growing downward (left→right from the seat's view) */
 	.pond {
 		display: grid;
 		grid-template-columns: repeat(6, auto);
@@ -630,20 +708,24 @@
 		justify-content: center;
 	}
 
-	.seat-top .pond {
+	/* Each river hugs the centre board and is rotated to face its seat. The side
+	   slots reserve the rotated bounding box (fixed width / generous min-height) so
+	   the transformed pond doesn't shove the central board around. */
+	.river-top .pond {
 		transform: rotate(180deg);
 	}
-	/* Side ponds rotate to face centre; the wrapper reserves a tall, narrow box so
-	   the rotated tiles don't overlap the concealed hand above them. */
-	.seat-left .pond-wrap,
-	.seat-right .pond-wrap {
+	.river-left,
+	.river-right {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		width: 124px;
 		min-height: 184px;
 	}
-	.seat-left .pond {
+	.river-left .pond {
 		transform: rotate(90deg);
 	}
-	.seat-right .pond {
+	.river-right .pond {
 		transform: rotate(-90deg);
 	}
 
@@ -931,10 +1013,49 @@
 		margin: 0.25rem 0;
 	}
 
+	/* Yaku breakdown — the list of yaku that scored, each with its han */
+	.yaku-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		margin: 0.75rem 0 0.5rem;
+		padding: 0.5rem 0.75rem;
+		background: rgba(0, 0, 0, 0.3);
+		border: 1px solid #2a2724;
+		border-radius: 6px;
+		text-align: left;
+	}
+
+	.yaku-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1.5rem;
+		font-size: 0.85rem;
+	}
+
+	.yaku-name {
+		color: #cfc7bb;
+	}
+
+	.yaku-han {
+		color: #8a8278;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+
 	.score-detail {
 		color: #888;
 		font-size: 0.9rem;
 		margin: 0.25rem 0 1rem;
+	}
+
+	.limit-name {
+		color: #c41e3a;
+		font-weight: 600;
+	}
+
+	.win-type {
+		opacity: 0.7;
 	}
 
 	.score-changes {

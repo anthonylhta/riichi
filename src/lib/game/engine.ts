@@ -261,6 +261,7 @@ export async function checkTsumo(
 		han: result.han,
 		fu: result.fu,
 		score: result.score,
+		yaku: result.yaku,
 		pointChanges
 	};
 }
@@ -306,6 +307,7 @@ export async function checkRon(
 		han: result.han,
 		fu: result.fu,
 		score: result.score,
+		yaku: result.yaku,
 		pointChanges
 	};
 }
