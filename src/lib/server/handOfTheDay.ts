@@ -102,7 +102,7 @@ async function generateHand(date: string): Promise<GeneratedHand | null> {
 		max_tokens: 2048,
 		thinking: { type: 'adaptive' },
 		system: [{ type: 'text', text: GEN_SYSTEM, cache_control: { type: 'ephemeral' } }],
-		output_config: { format: { type: 'json_schema', name: 'hand_puzzle', schema: HAND_SCHEMA } },
+		output_config: { format: { type: 'json_schema', schema: HAND_SCHEMA } },
 		messages: [
 			{
 				role: 'user',
