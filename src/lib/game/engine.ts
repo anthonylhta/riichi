@@ -429,11 +429,16 @@ function drawRinshan(state: GameState, seat: Seat): GameState {
 	};
 }
 
-function getHumanClaimOptions(
+export function getHumanClaimOptions(
 	state: GameState,
 	discardTile: GameTile,
 	discarderSeat: Seat
 ): ClaimOption[] {
+	// A declared-riichi hand is locked: no chi/pon/(daimin)kan. Only ron remains,
+	// and that is handled separately via pendingRon. Suppressing the options here
+	// means the claim_decision is skipped entirely when only a call was available.
+	if (state.players[0].isRiichi) return [];
+
 	const hand = state.players[0].hand;
 	const options: ClaimOption[] = [];
 
