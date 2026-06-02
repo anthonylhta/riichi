@@ -20,7 +20,8 @@ import {
 	humanDeclareTsumo,
 	humanDeclareRon,
 	humanPassClaim,
-	humanDiscard
+	humanDiscard,
+	getHumanClaimOptions
 } from './engine';
 import { getShanten } from './ai';
 import type { GameState, PlayerState, RoundResult, Seat } from './types';
@@ -494,5 +495,30 @@ describe('furiten', () => {
 		const result = await humanDiscard(state, discard.id);
 
 		expect(result.players[0].isTempFuriten).toBe(true);
+	});
+});
+
+// ─── riichi disables calls ───────────────────────────────────────────────────
+
+describe('getHumanClaimOptions — riichi locks the hand', () => {
+	// Human holds a pair of 5s (code 23); an opponent discards the third.
+	const makeClaimState = (riichi: boolean) =>
+		makeState({
+			players: [
+				makePlayer(0, { hand: [tile(23, 1), tile(23, 2), tile(7, 3)], isRiichi: riichi }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+	it('offers a pon when not in riichi', () => {
+		const options = getHumanClaimOptions(makeClaimState(false), tile(23, 99), 1);
+		expect(options.some((o) => o.type === 'pon')).toBe(true);
+	});
+
+	it('offers no chi/pon/kan once in riichi', () => {
+		const options = getHumanClaimOptions(makeClaimState(true), tile(23, 99), 1);
+		expect(options).toEqual([]);
 	});
 });
