@@ -239,20 +239,27 @@
 			<div class="player-area">
 				<div class="player-hand-row">
 					<div class="player-hand">
-						{#each $gameState.players[0].hand as t (t.id)}
+						{#each $gameState.players[0].hand as t, i (t.id)}
+							{@const riichiLocked = $gameState.players[0].isRiichi}
+							{@const isDrawn = i === $gameState.players[0].hand.length - 1}
 							<Tile
 								tile={t}
 								variant="hand"
 								selected={selectedTileId === t.id}
 								clickable={$gameState.phase === 'player_discard' &&
-									!(riichiActive && !wouldTriggerRiichi(t.id))}
+									(riichiLocked ? isDrawn : !(riichiActive && !wouldTriggerRiichi(t.id)))}
 								disabled={$gameState.phase !== 'player_discard' ||
-									(riichiActive && !wouldTriggerRiichi(t.id))}
+									(riichiLocked ? !isDrawn : riichiActive && !wouldTriggerRiichi(t.id))}
 								riichiTrigger={riichiActive && wouldTriggerRiichi(t.id)}
-								highlight={hoveredCode === t.code}
+								dimmed={riichiLocked && !isDrawn}
+								highlight={!riichiLocked && hoveredCode === t.code}
 								onclick={() => handleTileClick(t.id)}
-								onmouseenter={() => (hoveredCode = t.code)}
-								onmouseleave={() => (hoveredCode = null)}
+								onmouseenter={() => {
+									if (!riichiLocked) hoveredCode = t.code;
+								}}
+								onmouseleave={() => {
+									if (!riichiLocked) hoveredCode = null;
+								}}
 							/>
 						{/each}
 					</div>
@@ -286,7 +293,7 @@
 							{/if}
 							<p class="action-hint">
 								{#if $gameState.players[0].isRiichi}
-									Click a tile to discard (Riichi — draw tile only)
+									Riichi — drawn tiles auto-discard
 								{:else if riichiActive}
 									Declaring riichi — click a highlighted tile
 								{:else}

@@ -13,6 +13,7 @@ import {
 	humanDeclareAnkan,
 	humanDeclareKakan,
 	humanClaimDaiminkan,
+	getPlayerKanOptions,
 	stepAiTurn
 } from '$lib/game/engine';
 import type { TileCode } from '$lib/game/tiles';
@@ -38,13 +39,42 @@ async function runUntilPlayerTurn(state: GameState): Promise<void> {
 	}
 }
 
+// Once in riichi the hand is locked, so each draw is tsumogiri'd automatically
+// (Mahjong-Soul style) — unless the draw wins (Tsumo) or offers a kan, where we
+// stop and let the player decide. Chains through the AI turns it triggers.
+async function autoTsumogiri(): Promise<void> {
+	let safety = 0;
+	while (safety < 200) {
+		const s = get(gameState);
+		if (!s || s.phase !== 'player_discard' || s.currentSeat !== 0) break;
+		const me = s.players[0];
+		if (!me.isRiichi || s.pendingTsumo) break;
+		const kan = getPlayerKanOptions(s);
+		if (kan.ankan.length > 0 || kan.kakan.length > 0) break;
+
+		await sleep(AI_TURN_DELAY_MS);
+		const drawn = me.hand[me.hand.length - 1]; // drawTile appends without re-sorting
+		const next = await humanDiscard(s, drawn.id, false);
+		gameState.set(next);
+		if (next.phase === 'ai_turn') await runUntilPlayerTurn(next);
+		safety++;
+	}
+}
+
+// Set the state, run any AI turns, then handle riichi auto-tsumogiri. Every path
+// that can hand the turn back to the human goes through here.
+async function settleTurns(state: GameState): Promise<void> {
+	gameState.set(state);
+	if (state.phase === 'ai_turn') await runUntilPlayerTurn(state);
+	await autoTsumogiri();
+}
+
 export async function startGame() {
 	gameLoading.set(true);
 	gameError.set(null);
 	try {
 		const initial = initGame();
-		gameState.set(initial);
-		await runUntilPlayerTurn(initial);
+		await settleTurns(initial);
 	} catch (e) {
 		gameError.set(String(e));
 		console.error('startGame failed:', e);
@@ -58,10 +88,7 @@ export async function discard(tileId: number, declareRiichi = false) {
 	if (!current) return;
 	try {
 		const next = await humanDiscard(current, tileId, declareRiichi);
-		gameState.set(next);
-		if (next.phase === 'ai_turn') {
-			await runUntilPlayerTurn(next);
-		}
+		await settleTurns(next);
 	} catch (e) {
 		console.error('discard failed:', e);
 	}
@@ -116,10 +143,7 @@ export async function claimDaiminkan(handTiles: GameTile[]) {
 	if (!current) return;
 	try {
 		const next = await humanClaimDaiminkan(current, handTiles);
-		gameState.set(next);
-		if (next.phase === 'ai_turn') {
-			await runUntilPlayerTurn(next);
-		}
+		await settleTurns(next);
 	} catch (e) {
 		console.error('claimDaiminkan failed:', e);
 	}
@@ -130,10 +154,7 @@ export async function declareAnkan(code: TileCode) {
 	if (!current) return;
 	try {
 		const next = await humanDeclareAnkan(current, code);
-		gameState.set(next);
-		if (next.phase === 'ai_turn') {
-			await runUntilPlayerTurn(next);
-		}
+		await settleTurns(next);
 	} catch (e) {
 		console.error('declareAnkan failed:', e);
 	}
@@ -144,10 +165,7 @@ export async function declareKakan(meldIndex: number) {
 	if (!current) return;
 	try {
 		const next = await humanDeclareKakan(current, meldIndex);
-		gameState.set(next);
-		if (next.phase === 'ai_turn') {
-			await runUntilPlayerTurn(next);
-		}
+		await settleTurns(next);
 	} catch (e) {
 		console.error('declareKakan failed:', e);
 	}
@@ -158,10 +176,7 @@ export async function passClaim() {
 	if (!current) return;
 	try {
 		const next = await humanPassClaim(current);
-		gameState.set(next);
-		if (next.phase === 'ai_turn') {
-			await runUntilPlayerTurn(next);
-		}
+		await settleTurns(next);
 	} catch (e) {
 		console.error('passClaim failed:', e);
 	}
@@ -172,10 +187,7 @@ export async function nextRound() {
 	if (!current) return;
 	try {
 		const next = continueGame(current);
-		gameState.set(next);
-		if (next.phase === 'ai_turn') {
-			await runUntilPlayerTurn(next);
-		}
+		await settleTurns(next);
 	} catch (e) {
 		console.error('nextRound failed:', e);
 	}
