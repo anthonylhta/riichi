@@ -16,11 +16,16 @@
 		declareKakan,
 		passClaim
 	} from '$lib/stores/game';
-	import { tileLabel, suitClass } from '$lib/game/tiles';
+	import { tileLabel } from '$lib/game/tiles';
 	import { isTenpaiAfterDiscard } from '$lib/game/ai';
 	import { getPlayerKanOptions } from '$lib/game/engine';
+	import Tile from '$lib/components/Tile.svelte';
 
 	let selectedTileId = $state<number | null>(null);
+	let riichiArmed = $state(false);
+	// Hovering a hand tile lights up every matching tile in the rivers and your own
+	// discards — a reading aid (and furiten cue: a wait you've already discarded).
+	let hoveredCode = $state<number | null>(null);
 
 	onMount(async () => {
 		await startGame();
@@ -28,9 +33,11 @@
 
 	async function handleTileClick(tileId: number) {
 		if (!$gameState || $gameState.phase !== 'player_discard') return;
+		const declaring = riichiActive && wouldTriggerRiichi(tileId);
 		selectedTileId = tileId;
-		await discard(tileId);
+		await discard(tileId, declaring);
 		selectedTileId = null;
+		riichiArmed = false;
 	}
 
 	function wouldTriggerRiichi(tileId: number): boolean {
@@ -39,8 +46,26 @@
 		return isTenpaiAfterDiscard(player.hand, tileId);
 	}
 
+	// Riichi is opt-in: shown only when it is legal to declare (closed hand, 1000+
+	// points, and at least one discard keeps the hand tenpai).
+	let canRiichi = $derived(
+		$gameState?.phase === 'player_discard' &&
+			$gameState.currentSeat === 0 &&
+			!$gameState.players[0].isRiichi &&
+			$gameState.players[0].melds.length === 0 &&
+			$gameState.players[0].score >= 1000 &&
+			$gameState.players[0].hand.some((t) => wouldTriggerRiichi(t.id))
+	);
+	// Armed only counts while declaring is actually legal, so a stale armed flag
+	// (e.g. after an intervening claim) never blocks normal discards.
+	let riichiActive = $derived(riichiArmed && canRiichi);
+
 	const WIND_NAMES = ['East', 'South', 'West', 'North'];
-	const ROUND_NAMES = ['East 1', 'East 2', 'East 3', 'East 4'];
+	const WIND_KANJI = ['東', '南', '西', '北'];
+
+	function windIndex(seat: number, dealer: number): number {
+		return (seat - dealer + 4) % 4;
+	}
 
 	// Dev panel — only compiled in dev builds
 	const isDev = import.meta.env.DEV;
@@ -80,12 +105,51 @@
 	let seatNames = $derived(
 		$gameState
 			? ([0, 1, 2, 3] as const).map((seat) => {
-					const windIdx = (seat - $gameState!.dealer + 4) % 4;
+					const windIdx = windIndex(seat, $gameState!.dealer);
 					return seat === 0 ? `You (${WIND_NAMES[windIdx]})` : WIND_NAMES[windIdx];
 				})
 			: ['You', 'South', 'West', 'North']
 	);
 </script>
+
+<!-- Opponent seat: wind/name/score chip, concealed hand, melds, discard pond -->
+{#snippet opponentSeat(seat: number)}
+	{@const p = $gameState!.players[seat]}
+	<div class="seat-chip" class:active={$gameState!.currentSeat === seat}>
+		<span class="wind-mark">{WIND_KANJI[windIndex(seat, $gameState!.dealer)]}</span>
+		<span class="seat-name">{seatNames[seat]}</span>
+		<span class="seat-score">{p.score.toLocaleString()}</span>
+		{#if p.isRiichi}<span class="riichi-badge">立直</span>{/if}
+	</div>
+	<div class="concealed">
+		{#each p.hand as t (t.id)}
+			<Tile back variant="pond" />
+		{/each}
+	</div>
+	{#if p.melds.length > 0}
+		<div class="seat-melds">
+			{#each p.melds as meld, mi (mi)}
+				<div class="meld-group">
+					{#each meld.tiles as t (t.id)}
+						<Tile tile={t} variant="meld" />
+					{/each}
+				</div>
+			{/each}
+		</div>
+	{/if}
+	<div class="pond-wrap">
+		<div class="pond">
+			{#each p.discards as t, di (t.id)}
+				<Tile
+					tile={t}
+					variant="pond"
+					recent={p.isRiichi ? false : di === p.discards.length - 1}
+					highlight={hoveredCode === t.code}
+				/>
+			{/each}
+		</div>
+	</div>
+{/snippet}
 
 <div class="game-wrapper">
 	{#if $gameLoading}
@@ -99,11 +163,11 @@
 	{:else if $gameState}
 		<!-- Header -->
 		<header class="game-header">
-			<span class="round-label">{ROUND_NAMES[($gameState.round ?? 1) - 1]}</span>
+			<span class="round-label">{WIND_KANJI[0]} {$gameState.round}</span>
 			{#if $gameState.honba > 0}
-				<span class="honba">{$gameState.honba} Honba</span>
+				<span class="honba">{$gameState.honba} 本場</span>
 			{/if}
-			<span class="wall-count">Wall: {$gameState.liveWall.length - $gameState.wallPos} tiles</span>
+			<span class="wall-count">Wall {$gameState.liveWall.length - $gameState.wallPos}</span>
 			{#if isDev}
 				<button class="dev-toggle" onclick={() => (devPanelOpen = !devPanelOpen)}>
 					{devPanelOpen ? '✕ Dev' : '⚙ Dev'}
@@ -128,83 +192,83 @@
 			</div>
 		{/if}
 
-		<!-- Opponent info row -->
-		<div class="opponents">
-			{#each [1, 2, 3] as seat (seat)}
-				<div class="opponent-panel" class:riichi={$gameState.players[seat].isRiichi}>
-					<div class="opponent-name">
-						{seatNames[seat]}
-						{#if $gameState.players[seat].isRiichi}<span class="riichi-badge">立直</span>{/if}
-					</div>
-					<div class="opponent-score">{$gameState.players[seat].score.toLocaleString()}</div>
-					<div class="opponent-tiles">
-						{#each $gameState.players[seat].hand as tile (tile.id)}
-							<div class="tile tile-back" data-id={tile.id}></div>
-						{/each}
-					</div>
-					{#if $gameState.players[seat].melds.length > 0}
-						<div class="meld-row">
-							{#each $gameState.players[seat].melds as meld, mi (mi)}
-								<span class="meld-group">
-									{#each meld.tiles as tile (tile.id)}
-										<div class="tile tile-small tile-{suitClass(tile.code)}">
-											{tileLabel(tile.code)}
-										</div>
-									{/each}
-								</span>
-							{/each}
-						</div>
-					{/if}
-					<div class="discard-row">
-						{#each $gameState.players[seat].discards as tile (tile.id)}
-							<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
-						{/each}
-					</div>
+		<!-- The table: four seats around a central board -->
+		<div class="board">
+			<div class="seat seat-top">{@render opponentSeat(2)}</div>
+			<div class="seat seat-left">{@render opponentSeat(3)}</div>
+
+			<div class="center-board">
+				<div class="center-round">{WIND_KANJI[0]}{$gameState.round}</div>
+				{#if $gameState.honba > 0}
+					<div class="center-honba">{$gameState.honba} 本場</div>
+				{/if}
+				<div class="center-wall">
+					<span class="wall-num">{$gameState.liveWall.length - $gameState.wallPos}</span>
+					<span class="wall-unit">tiles left</span>
 				</div>
-			{/each}
-		</div>
+				<div class="center-dora">
+					<span class="dora-label">ドラ</span>
+					{#each $gameState.doraIndicators as t (t.id)}
+						<Tile tile={t} variant="dora" />
+					{/each}
+				</div>
+				{#if $gameState.riichiBets > 0}
+					<div class="center-sticks">
+						<span class="stick-dot"></span>
+						{$gameState.riichiBets} riichi {$gameState.riichiBets === 1 ? 'stick' : 'sticks'}
+					</div>
+				{/if}
+			</div>
 
-		<!-- Dora indicator -->
-		<div class="dora-row">
-			<span class="dora-label">Dora indicator:</span>
-			{#each $gameState.doraIndicators as tile (tile.id)}
-				<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
-			{/each}
-		</div>
+			<div class="seat seat-right">{@render opponentSeat(1)}</div>
 
-		<!-- Player hand -->
-		<div class="player-area">
-			<div class="player-meta">
-				<span class="player-name">
-					{seatNames[0]}
+			<!-- Bottom: your discard pond + seat chip (hand sits below the table) -->
+			<div class="seat seat-bottom">
+				<div class="seat-chip" class:active={$gameState.currentSeat === 0}>
+					<span class="wind-mark">{WIND_KANJI[windIndex(0, $gameState.dealer)]}</span>
+					<span class="seat-name">{seatNames[0]}</span>
+					<span class="seat-score">{$gameState.players[0].score.toLocaleString()}</span>
 					{#if $gameState.players[0].isRiichi}<span class="riichi-badge">立直</span>{/if}
 					{#if $gameState.players[0].isFuriten || $gameState.players[0].isTempFuriten}
 						<span class="furiten-badge">振聴</span>
 					{/if}
-				</span>
-				<span class="player-score">{$gameState.players[0].score.toLocaleString()} pts</span>
+				</div>
+				<div class="pond-wrap">
+					<div class="pond">
+						{#each $gameState.players[0].discards as t, di (t.id)}
+							<Tile
+								tile={t}
+								variant="pond"
+								recent={$gameState.players[0].isRiichi
+									? false
+									: di === $gameState.players[0].discards.length - 1}
+								highlight={hoveredCode === t.code}
+							/>
+						{/each}
+					</div>
+				</div>
 			</div>
+		</div>
 
-			<div class="player-discards">
-				{#each $gameState.players[0].discards as tile (tile.id)}
-					<div class="tile tile-small tile-{suitClass(tile.code)}">{tileLabel(tile.code)}</div>
-				{/each}
-			</div>
-
+		<!-- Your hand + melds + actions -->
+		<div class="player-area">
 			<div class="player-hand-row">
 				<div class="player-hand">
-					{#each $gameState.players[0].hand as tile (tile.id)}
-						<button
-							class="tile tile-large tile-{suitClass(tile.code)}"
-							class:selected={selectedTileId === tile.id}
-							class:clickable={$gameState.phase === 'player_discard'}
-							class:riichi-trigger={$gameState.phase === 'player_discard' &&
-								wouldTriggerRiichi(tile.id)}
-							disabled={$gameState.phase !== 'player_discard'}
-							onclick={() => handleTileClick(tile.id)}
-						>
-							{tileLabel(tile.code)}
-						</button>
+					{#each $gameState.players[0].hand as t (t.id)}
+						<Tile
+							tile={t}
+							variant="hand"
+							selected={selectedTileId === t.id}
+							clickable={$gameState.phase === 'player_discard' &&
+								!(riichiActive && !wouldTriggerRiichi(t.id))}
+							disabled={$gameState.phase !== 'player_discard' ||
+								(riichiActive && !wouldTriggerRiichi(t.id))}
+							riichiTrigger={riichiActive && wouldTriggerRiichi(t.id)}
+							highlight={hoveredCode === t.code}
+							onclick={() => handleTileClick(t.id)}
+							onmouseenter={() => (hoveredCode = t.code)}
+							onmouseleave={() => (hoveredCode = null)}
+						/>
 					{/each}
 				</div>
 
@@ -212,10 +276,8 @@
 					<div class="player-melds">
 						{#each $gameState.players[0].melds as meld, mi (mi)}
 							<div class="meld-group">
-								{#each meld.tiles as tile (tile.id)}
-									<div class="tile tile-large tile-{suitClass(tile.code)}">
-										{tileLabel(tile.code)}
-									</div>
+								{#each meld.tiles as t (t.id)}
+									<Tile tile={t} variant="meld" />
 								{/each}
 							</div>
 						{/each}
@@ -228,10 +290,23 @@
 					{#if $gameState.pendingTsumo}
 						<button class="action-btn tsumo-btn" onclick={declareTsumo}>Tsumo 自摸</button>
 					{:else}
+						{#if canRiichi}
+							<button
+								class="action-btn riichi-btn"
+								class:armed={riichiActive}
+								onclick={() => (riichiArmed = !riichiArmed)}
+							>
+								{riichiActive ? 'Cancel' : 'Riichi 立直'}
+							</button>
+						{/if}
 						<p class="action-hint">
-							Click a tile to discard{$gameState.players[0].isRiichi
-								? ' (Riichi — draw tile only)'
-								: ''}
+							{#if $gameState.players[0].isRiichi}
+								Click a tile to discard (Riichi — draw tile only)
+							{:else if riichiActive}
+								Declaring riichi — click a highlighted tile
+							{:else}
+								Click a tile to discard
+							{/if}
 						</p>
 					{/if}
 					{#each kanOptions.ankan as code (code)}
@@ -255,12 +330,10 @@
 					<div class="claim-title">Your turn to claim</div>
 					{#if $gameState.lastDiscard}
 						<div class="claim-tile-display">
-							<div class="tile tile-large tile-{suitClass($gameState.lastDiscard.code)}">
-								{tileLabel($gameState.lastDiscard.code)}
-							</div>
-							<span class="claim-from"
-								>discarded by {seatNames[$gameState.lastDiscardSeat ?? 0]}</span
-							>
+							<Tile tile={$gameState.lastDiscard} variant="hand" />
+							<span class="claim-from">
+								discarded by {seatNames[$gameState.lastDiscardSeat ?? 0]}
+							</span>
 						</div>
 					{/if}
 					<div class="claim-actions">
@@ -279,11 +352,9 @@
 							{:else if option.type === 'chi'}
 								<button class="claim-btn btn-chi" onclick={() => claimChi(option.handTiles)}>
 									Chi チー
-									<span class="chi-tiles"
-										>{tileLabel(option.handTiles[0].code)}·{tileLabel(
-											option.handTiles[1].code
-										)}</span
-									>
+									<span class="chi-tiles">
+										{tileLabel(option.handTiles[0].code)}·{tileLabel(option.handTiles[1].code)}
+									</span>
 								</button>
 							{/if}
 						{/each}
@@ -371,7 +442,7 @@
 
 <style>
 	:global(body) {
-		background: #111;
+		background: #0b0a0a;
 		color: #e8e0d5;
 		font-family: 'Inter', system-ui, sans-serif;
 		margin: 0;
@@ -381,9 +452,9 @@
 		min-height: 100vh;
 		display: flex;
 		flex-direction: column;
-		padding: 1rem;
-		gap: 1rem;
-		max-width: 960px;
+		padding: 0.75rem 1rem 1rem;
+		gap: 0.75rem;
+		max-width: 1000px;
 		margin: 0 auto;
 	}
 
@@ -400,15 +471,16 @@
 		display: flex;
 		gap: 1rem;
 		align-items: center;
-		padding: 0.5rem 0;
-		border-bottom: 1px solid #222;
+		padding: 0.25rem 0.25rem 0.5rem;
+		border-bottom: 1px solid #1e1c1a;
 		font-size: 0.9rem;
-		color: #888;
+		color: #8a8278;
 	}
 
 	.round-label {
 		font-weight: 600;
 		color: #e8e0d5;
+		letter-spacing: 0.04em;
 	}
 
 	.honba {
@@ -419,123 +491,245 @@
 		margin-left: auto;
 	}
 
-	.opponents {
+	/* ── Table ─────────────────────────────────────────────────────────── */
+	.board {
+		flex: 1;
+		min-height: 0;
+		width: 100%;
+		max-width: 860px;
+		margin: 0 auto;
 		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 0.75rem;
+		grid-template-columns: minmax(110px, 1fr) minmax(220px, 1.7fr) minmax(110px, 1fr);
+		grid-template-rows: auto minmax(170px, 1fr) auto;
+		grid-template-areas:
+			'.    top    .'
+			'left center right'
+			'.    bottom .';
+		gap: 0.5rem;
+		align-items: center;
+		justify-items: center;
+		padding: 1.25rem;
+		border-radius: 14px;
+		border: 1px solid #1b1916;
+		/* faint cool-dark felt with a centre glow + edge vignette */
+		background: radial-gradient(ellipse 64% 60% at 50% 50%, #15191b 0%, #101315 60%, #0c0e0f 100%);
+		box-shadow:
+			inset 0 0 60px rgba(0, 0, 0, 0.6),
+			inset 0 0 0 1px rgba(255, 255, 255, 0.015);
 	}
 
-	.opponent-panel {
-		background: #181818;
-		border: 1px solid #222;
-		border-radius: 6px;
-		padding: 0.6rem;
-		min-height: 80px;
+	.seat-top {
+		grid-area: top;
+	}
+	.seat-left {
+		grid-area: left;
+	}
+	.seat-right {
+		grid-area: right;
+	}
+	.seat-bottom {
+		grid-area: bottom;
+	}
+	.center-board {
+		grid-area: center;
 	}
 
-	.opponent-panel.riichi {
-		border-color: #c41e3a;
-	}
-
-	.opponent-name {
-		font-size: 0.75rem;
-		color: #888;
-		margin-bottom: 0.3rem;
+	.seat {
 		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.3rem;
+	}
+
+	/* Seat info chip */
+	.seat-chip {
+		display: inline-flex;
 		align-items: center;
 		gap: 0.4rem;
+		padding: 0.2rem 0.6rem;
+		background: #15140f;
+		border: 1px solid #262320;
+		border-radius: 999px;
+		font-size: 0.72rem;
+		color: #9a9286;
+		white-space: nowrap;
+	}
+
+	.seat-chip.active {
+		border-color: #c41e3a;
+		box-shadow: 0 0 10px rgba(196, 30, 58, 0.4);
+		color: #e8e0d5;
+	}
+
+	.wind-mark {
+		font-family: 'Noto Serif JP', serif;
+		font-size: 0.85rem;
+		color: #c41e3a;
+		line-height: 1;
+	}
+
+	.seat-name {
+		font-weight: 600;
+		color: #cfc7bb;
+	}
+
+	.seat-score {
+		color: #8a8278;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.riichi-badge {
 		color: #c41e3a;
-		font-size: 0.8rem;
+		font-family: 'Noto Serif JP', serif;
+		font-size: 0.78rem;
 	}
 
 	.furiten-badge {
 		color: #888;
-		font-size: 0.75rem;
+		font-size: 0.72rem;
 		border: 1px solid #444;
 		border-radius: 3px;
 		padding: 0 4px;
 	}
 
-	.opponent-score {
-		font-size: 0.85rem;
-		font-weight: 600;
-		margin-bottom: 0.4rem;
+	.concealed {
+		display: flex;
+		gap: 1px;
+		flex-wrap: wrap;
+		justify-content: center;
+		max-width: 240px;
 	}
 
-	.opponent-tiles {
+	.seat-melds,
+	.player-melds {
 		display: flex;
+		gap: 5px;
 		flex-wrap: wrap;
-		gap: 2px;
-		margin-bottom: 0.4rem;
-	}
-
-	.meld-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 4px;
-		margin-bottom: 0.4rem;
+		justify-content: center;
 	}
 
 	.meld-group {
 		display: flex;
 		gap: 1px;
-		background: #222;
+		background: rgba(0, 0, 0, 0.25);
 		border-radius: 3px;
 		padding: 2px;
 	}
 
-	.discard-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 2px;
-	}
-
-	.dora-row {
+	/* Discard pond — 6 per row, oriented toward the centre per seat */
+	.pond-wrap {
 		display: flex;
 		align-items: center;
+		justify-content: center;
+	}
+
+	.pond {
+		display: grid;
+		grid-template-columns: repeat(6, auto);
+		gap: 3px;
+		justify-content: center;
+	}
+
+	.seat-top .pond {
+		transform: rotate(180deg);
+	}
+	/* Side ponds rotate to face centre; the wrapper reserves a tall, narrow box so
+	   the rotated tiles don't overlap the concealed hand above them. */
+	.seat-left .pond-wrap,
+	.seat-right .pond-wrap {
+		width: 124px;
+		min-height: 184px;
+	}
+	.seat-left .pond {
+		transform: rotate(90deg);
+	}
+	.seat-right .pond {
+		transform: rotate(-90deg);
+	}
+
+	/* Centre board */
+	.center-board {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 		gap: 0.4rem;
-		font-size: 0.8rem;
-		color: #888;
+		padding: 0.8rem 1rem;
+		border-radius: 10px;
+		background: rgba(0, 0, 0, 0.28);
+		border: 1px solid #1c1a17;
+		min-width: 150px;
+	}
+
+	.center-round {
+		font-family: 'Noto Serif JP', serif;
+		font-size: 1.6rem;
+		font-weight: 700;
+		color: #e8e0d5;
+		line-height: 1;
+	}
+
+	.center-honba {
+		font-size: 0.72rem;
+		color: #c41e3a;
+	}
+
+	.center-wall {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		margin: 0.1rem 0;
+	}
+
+	.wall-num {
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: #cfc7bb;
+		font-variant-numeric: tabular-nums;
+		line-height: 1;
+	}
+
+	.wall-unit {
+		font-size: 0.62rem;
+		color: #6a6258;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.center-dora {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
 	}
 
 	.dora-label {
-		white-space: nowrap;
+		font-family: 'Noto Serif JP', serif;
+		font-size: 0.72rem;
+		color: #8a8278;
 	}
 
+	.center-sticks {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.68rem;
+		color: #b7ada0;
+	}
+
+	.stick-dot {
+		width: 18px;
+		height: 4px;
+		border-radius: 2px;
+		background: #d8d2c6;
+		box-shadow: 0 0 0 1px #c41e3a inset;
+		position: relative;
+	}
+
+	/* ── Your hand ─────────────────────────────────────────────────────── */
 	.player-area {
-		margin-top: auto;
-		border-top: 1px solid #222;
-		padding-top: 1rem;
-	}
-
-	.player-meta {
 		display: flex;
+		flex-direction: column;
 		align-items: center;
-		gap: 1rem;
-		margin-bottom: 0.5rem;
-	}
-
-	.player-name {
-		font-weight: 600;
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-
-	.player-score {
-		color: #888;
-		font-size: 0.9rem;
-	}
-
-	.player-discards {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 3px;
-		margin-bottom: 0.75rem;
-		min-height: 28px;
+		gap: 0.6rem;
 	}
 
 	.player-hand-row {
@@ -543,108 +737,27 @@
 		align-items: flex-end;
 		gap: 1rem;
 		flex-wrap: wrap;
-		margin-bottom: 0.5rem;
+		justify-content: center;
 	}
 
 	.player-hand {
 		display: flex;
-		flex-wrap: wrap;
-		gap: 4px;
-	}
-
-	.player-melds {
-		display: flex;
-		gap: 6px;
-		align-items: flex-end;
+		gap: 5px;
+		padding-top: 9px; /* room for hover/selected lift */
 	}
 
 	.player-actions {
-		min-height: 2rem;
+		min-height: 2.25rem;
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-	}
-
-	/* Tile styles */
-	.tile {
-		display: inline-flex;
-		align-items: center;
 		justify-content: center;
-		background: #1e1e1e;
-		border: 1px solid #333;
-		border-radius: 4px;
-		font-weight: 600;
-		user-select: none;
-		transition:
-			transform 0.1s,
-			border-color 0.1s;
-	}
-
-	.tile-back {
-		width: 18px;
-		height: 24px;
-		background: #1a1a2e;
-		border-color: #2a2a4e;
-	}
-
-	.tile-small {
-		width: 22px;
-		height: 28px;
-		font-size: 0.65rem;
-	}
-
-	.tile-large {
-		width: 42px;
-		height: 56px;
-		font-size: 1rem;
-		cursor: default;
-	}
-
-	.tile-large.clickable {
-		cursor: pointer;
-	}
-
-	.tile-large.clickable:hover {
-		transform: translateY(-6px);
-		border-color: #555;
-	}
-
-	.tile-large.selected {
-		transform: translateY(-8px);
-		border-color: #c41e3a;
-	}
-
-	.tile-large.riichi-trigger {
-		border-color: #c8a020;
-	}
-
-	.tile-large.riichi-trigger:hover {
-		border-color: #f0c030;
-	}
-
-	/* Suit colours */
-	.tile-man {
-		color: #e05050;
-	}
-	.tile-pin {
-		color: #4a9eff;
-	}
-	.tile-sou {
-		color: #4caf50;
-	}
-	.tile-wind {
-		color: #ccc;
-	}
-	.tile-dragon {
-		color: #e8d080;
-	}
-	.tile-dragon-chun {
-		color: #c41e3a;
+		gap: 0.5rem;
+		flex-wrap: wrap;
 	}
 
 	.action-hint {
 		font-size: 0.8rem;
-		color: #555;
+		color: #6a6258;
 		margin: 0;
 	}
 
@@ -680,7 +793,21 @@
 		background: #3a2060;
 	}
 
-	/* Claim card */
+	.riichi-btn {
+		background: #c8a020;
+		color: #1a1a1a;
+	}
+
+	.riichi-btn:hover {
+		background: #b08c18;
+	}
+
+	.riichi-btn.armed {
+		background: #f0c030;
+		box-shadow: 0 0 0 2px #f0c030;
+	}
+
+	/* ── Claim card ────────────────────────────────────────────────────── */
 	.claim-card {
 		background: #181818;
 		border: 1px solid #333;
@@ -702,7 +829,7 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 0.4rem;
+		gap: 0.5rem;
 		margin-bottom: 1.25rem;
 	}
 
@@ -771,7 +898,7 @@
 		min-width: 80px;
 	}
 
-	/* Overlay */
+	/* ── Overlays ──────────────────────────────────────────────────────── */
 	.overlay {
 		position: fixed;
 		inset: 0;
@@ -864,7 +991,7 @@
 		white-space: pre-wrap;
 	}
 
-	/* Dev panel */
+	/* ── Dev panel ─────────────────────────────────────────────────────── */
 	.dev-toggle {
 		margin-left: auto;
 		padding: 0.2rem 0.6rem;

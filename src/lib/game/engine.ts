@@ -194,6 +194,15 @@ function openMeldsFor(player: PlayerState): [boolean, TileCode[]][] {
 	return player.melds.map((m) => [m.type !== 'ankan', m.tiles.map((t) => t.code)]);
 }
 
+// Count red-five (aka dora) tiles across a set of tiles — used to score aka dora.
+function countAka(tiles: GameTile[]): number {
+	return tiles.filter((t) => t.isRed).length;
+}
+
+function meldTiles(player: PlayerState): GameTile[] {
+	return player.melds.flatMap((m) => m.tiles);
+}
+
 export async function checkTsumo(
 	state: GameState,
 	seat: Seat,
@@ -218,6 +227,7 @@ export async function checkTsumo(
 		afterKan,
 		firstTake: isFirstTake,
 		lastTile: isLastTile,
+		akaCount: countAka(player.hand) + countAka(meldTiles(player)),
 		ronTileCode: null,
 		seatWind: getSeatWind(seat, state.dealer),
 		roundWind: getRoundWind()
@@ -274,6 +284,7 @@ export async function checkRon(
 		isIppatsu: player.isIppatsu,
 		isTsumo: false,
 		lastTile: isLastTile,
+		akaCount: countAka(player.hand) + countAka(meldTiles(player)) + countAka([discardTile]),
 		ronTileCode: discardTile.code,
 		seatWind: getSeatWind(claimantSeat, state.dealer),
 		roundWind: getRoundWind()
@@ -558,18 +569,26 @@ async function applyAiCalls(
 	return state;
 }
 
-export async function humanDiscard(state: GameState, tileId: number): Promise<GameState> {
+export async function humanDiscard(
+	state: GameState,
+	tileId: number,
+	declareRiichi = false
+): Promise<GameState> {
 	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return state;
 
 	const player = state.players[0];
 	const tile = player.hand.find((t) => t.id === tileId);
 	if (!tile) return state;
 
-	// Only auto-declare riichi on a closed hand
+	// Riichi is opt-in: the player must explicitly request it, and it is only legal
+	// from a closed hand with 1000+ points that stays tenpai after this discard.
+	// Without the flag the player simply discards and stays in quiet tenpai.
 	const canDeclareRiichi =
 		!player.isRiichi &&
 		player.melds.length === 0 &&
+		player.score >= 1000 &&
 		getShanten(player.hand.filter((t) => t.id !== tileId).map((t) => t.code)) === 0;
+	const willDeclareRiichi = declareRiichi && canDeclareRiichi;
 
 	const players = clonePlayers(state);
 	players[0].hand = sortHand(player.hand.filter((t) => t.id !== tileId));
@@ -580,7 +599,7 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 		players[0].isIppatsu = false;
 	}
 
-	if (canDeclareRiichi) {
+	if (willDeclareRiichi) {
 		players[0].isRiichi = true;
 		players[0].isIppatsu = true;
 		players[0].isDoubleRiichi = player.discards.length === 0 && !state.anyCallMadeThisRound;
@@ -591,7 +610,7 @@ export async function humanDiscard(state: GameState, tileId: number): Promise<Ga
 	const postDiscard: GameState = {
 		...state,
 		players,
-		riichiBets: canDeclareRiichi ? state.riichiBets + 1 : state.riichiBets,
+		riichiBets: willDeclareRiichi ? state.riichiBets + 1 : state.riichiBets,
 		lastDiscard: tile,
 		lastDiscardSeat: 0,
 		phase: 'ai_turn',
@@ -772,8 +791,11 @@ export function getPlayerKanOptions(state: GameState): {
 
 export async function humanPassClaim(state: GameState): Promise<GameState> {
 	if (state.phase !== 'claim_decision') return state;
+	if (!state.lastDiscard || state.lastDiscardSeat === null) return state;
 
-	const nextSeat = (((state.lastDiscardSeat ?? 0) + 1) % 4) as Seat;
+	const discardTile = state.lastDiscard;
+	const discarderSeat = state.lastDiscardSeat;
+	const nextSeat = ((discarderSeat + 1) % 4) as Seat;
 
 	// Passing on an available ron sets temp furiten (permanent if already in riichi)
 	const players = clonePlayers(state);
@@ -781,15 +803,34 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 		players[0].isTempFuriten = true;
 	}
 
-	const cleared = { ...state, players, pendingRon: null, claimOptions: null };
+	const cleared: GameState = {
+		...state,
+		players,
+		phase: 'ai_turn',
+		pendingRon: null,
+		claimOptions: null
+	};
 
+	// runAiTurn hands the decision to the human *before* it checks AI claims, so a
+	// human pass must not silently forfeit them. Resolve the AI's claim on this same
+	// discard in priority order — ron first, then pon/chi/daiminkan — before advancing.
+	for (let claimant = 1; claimant < 4; claimant++) {
+		if (claimant === discarderSeat) continue;
+		const ron = await checkRon(cleared, claimant as Seat, discardTile, discarderSeat);
+		if (ron) return applyRoundResult(cleared, ron);
+	}
+
+	const afterAiCalls = await applyAiCalls(cleared, discardTile, discarderSeat);
+	if (afterAiCalls !== cleared) return afterAiCalls;
+
+	// No AI claimed — advance normally.
 	if (nextSeat === 0) {
-		const drawn = drawTile({ ...cleared, phase: 'ai_turn' }, 0);
+		const drawn = drawTile(cleared, 0);
 		const tsumo = await checkTsumo(drawn, 0);
 		return { ...drawn, pendingTsumo: tsumo };
 	}
 
-	return { ...cleared, phase: 'ai_turn', currentSeat: nextSeat };
+	return { ...cleared, currentSeat: nextSeat };
 }
 
 export async function runAiTurn(state: GameState): Promise<GameState> {
