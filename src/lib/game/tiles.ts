@@ -108,6 +108,21 @@ export function toEffStr(code: TileCode): string {
 	return `${code - 27}z`; // winds 1-4z, dragons 5-7z
 }
 
+// Parse mahjong notation ('1m'..'9m', '1p'..'9p', '1s'..'9s', '1z'..'7z') into a
+// tile code, inverse of toEffStr. 1-4z are the winds E/S/W/N, 5-7z the dragons
+// (haku/hatsu/chun). Returns null for anything malformed.
+export function parseEffStr(str: string): TileCode | null {
+	const m = /^([1-9])([mps])$/.exec(str.trim());
+	if (m) {
+		const n = Number(m[1]);
+		const base = m[2] === 'm' ? 0 : m[2] === 'p' ? 9 : 18;
+		return (base + n) as TileCode;
+	}
+	const z = /^([1-7])z$/.exec(str.trim());
+	if (z) return (27 + Number(z[1])) as TileCode;
+	return null;
+}
+
 // Convert hand of codes to mahjong-tile-efficiency 4-array format
 export function toEffHand(codes: TileCode[]): number[][] {
 	const h = [

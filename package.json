@@ -41,6 +41,7 @@
 		"vitest": "^4.1.7"
 	},
 	"dependencies": {
+		"@anthropic-ai/sdk": "^0.100.1",
 		"@neondatabase/serverless": "^1.1.0",
 		"drizzle-orm": "^0.45.2",
 		"mahjong-tile-efficiency": "^1.0.3",
