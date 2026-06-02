@@ -85,7 +85,7 @@ What should I do? Recommend the single best tile to discard now (tile notation) 
 		thinking: { type: 'adaptive' },
 		system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
 		output_config: {
-			format: { type: 'json_schema', name: 'advice', schema: SCHEMA },
+			format: { type: 'json_schema', schema: SCHEMA },
 			effort: 'low'
 		},
 		messages: [{ role: 'user', content: prompt }]
