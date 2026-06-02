@@ -9,7 +9,9 @@ vi.mock('./ai', () => ({
 }));
 
 vi.mock('./scoring', () => ({
-	checkWin: vi.fn().mockResolvedValue({ isWin: false, han: 0, fu: 0, score: 0, yakuNames: [] })
+	checkWin: vi
+		.fn()
+		.mockResolvedValue({ isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] })
 }));
 
 import {
@@ -179,6 +181,7 @@ describe('humanDeclareTsumo', () => {
 			han: 2,
 			fu: 30,
 			score: 2000,
+			yaku: [],
 			pointChanges: [6000, -2000, -2000, -2000]
 		};
 
@@ -211,6 +214,7 @@ describe('humanDeclareRon', () => {
 			han: 3,
 			fu: 40,
 			score: 7700,
+			yaku: [],
 			pointChanges: [7700, -7700, 0, 0]
 		};
 
@@ -419,6 +423,7 @@ describe('furiten', () => {
 			han: 2,
 			fu: 30,
 			score: 3900,
+			yaku: [],
 			pointChanges: [3900, -3900, 0, 0]
 		};
 

@@ -78,8 +78,9 @@ export function isSimple(code: TileCode): boolean {
 	return !isHonor(code) && !isTerminal(code);
 }
 
-const WIND_LABELS = ['', 'E', 'S', 'W', 'N'];
-const DRAGON_LABELS = ['', '白', '発', '中'];
+// Honor labels match Mahjong Soul: kanji winds and the traditional 發 for hatsu.
+const WIND_LABELS = ['', '東', '南', '西', '北'];
+const DRAGON_LABELS = ['', '白', '發', '中'];
 
 export function tileLabel(code: TileCode): string {
 	const suit = getSuit(code);

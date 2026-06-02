@@ -43,6 +43,13 @@
 		const v = getValue(code as never);
 		return v === 1 ? 'haku' : v === 2 ? 'hatsu' : 'chun';
 	}
+
+	// White dragon (haku) renders as a blank face — a traditional blank white-dragon
+	// tile — rather than a glyph.
+	function faceLabel(code: number): string {
+		if (getSuit(code as never) === 'dragon' && getValue(code as never) === 1) return '';
+		return tileLabel(code);
+	}
 </script>
 
 {#if back}
@@ -63,11 +70,11 @@
 			{onmouseenter}
 			{onmouseleave}
 		>
-			<span class="label">{tileLabel(tile.code)}</span>
+			<span class="label">{faceLabel(tile.code)}</span>
 		</button>
 	{:else}
 		<div class={cls} class:highlight class:dimmed class:recent class:rotated class:red={tile.isRed}>
-			<span class="label">{tileLabel(tile.code)}</span>
+			<span class="label">{faceLabel(tile.code)}</span>
 		</div>
 	{/if}
 {/if}
@@ -164,14 +171,21 @@
 		color: #c41e3a;
 	}
 
-	/* Aka dora (red five) — crimson tint + glow, number forced crimson */
+	/* Aka dora (red five) — keep the normal ivory face; mark it with a small red dot
+	   in the top-right corner (the crimson glow was too much) and force the number red. */
 	.red {
-		background: linear-gradient(168deg, #fbeef0 0%, #f3dadf 100%);
-		border-color: #c41e3a;
-		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.7),
-			0 2px 0 #a8909a,
-			0 0 7px rgba(196, 30, 58, 0.6);
+		position: relative;
+	}
+	.red::after {
+		content: '';
+		position: absolute;
+		top: 2px;
+		right: 2px;
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background: #c41e3a;
+		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
 	}
 	.red .label {
 		color: #c41e3a;
