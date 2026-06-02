@@ -81,8 +81,10 @@ What should I do? Recommend the single best tile to discard now (tile notation) 
 
 	const res = await anthropic().messages.create({
 		model: MODEL,
-		max_tokens: 1024,
-		thinking: { type: 'adaptive' },
+		max_tokens: 768,
+		// Thinking off for snappiness — the discard is already grounded by the
+		// efficiency analysis, so the model just needs to pick + explain.
+		thinking: { type: 'disabled' },
 		system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
 		output_config: {
 			format: { type: 'json_schema', schema: SCHEMA },
