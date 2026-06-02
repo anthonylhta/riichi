@@ -9,7 +9,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '$env/dynamic/private';
 import { eq } from 'drizzle-orm';
-import { db } from './db';
+import { getDb } from './db';
 import { handOfTheDay } from './schema';
 import { analyzeHand } from './efficiency';
 import { toEffStr, parseEffStr, isHonor } from '$lib/game/tiles';
@@ -223,6 +223,7 @@ async function generatePuzzle(date: string): Promise<{ puzzle: Puzzle; model: st
 // Today's puzzle — generated once and cached in Neon, shared by all visitors.
 // onConflictDoNothing handles the race where two first-visitors generate at once.
 export async function getOrCreateToday(): Promise<StoredPuzzle> {
+	const db = getDb();
 	const date = utcDate();
 
 	const existing = await db.select().from(handOfTheDay).where(eq(handOfTheDay.date, date)).limit(1);
