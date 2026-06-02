@@ -22,6 +22,7 @@
 	import { isTenpaiAfterDiscard } from '$lib/game/ai';
 	import { getPlayerKanOptions } from '$lib/game/engine';
 	import { buildReviewPayload, type RoundRecord } from '$lib/game/review';
+	import { buildHelperView, type HelperAdvice } from '$lib/game/helper';
 	import Tile from '$lib/components/Tile.svelte';
 
 	// Post-game overview (Claude) — generated on demand from the flagged moments.
@@ -55,6 +56,36 @@
 
 	let selectedTileId = $state<number | null>(null);
 	let riichiArmed = $state(false);
+
+	// In-round AI helper (off by default — the player presses for advice).
+	let helperAdvice = $state<HelperAdvice | null>(null);
+	let helperLoading = $state(false);
+	let helperError = $state<string | null>(null);
+
+	async function askHelper() {
+		if (!$gameState || helperLoading) return;
+		helperLoading = true;
+		helperError = null;
+		helperAdvice = null;
+		try {
+			const res = await fetch('/api/helper', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(buildHelperView($gameState))
+			});
+			if (!res.ok) throw new Error('helper failed');
+			helperAdvice = (await res.json()) as HelperAdvice;
+		} catch {
+			helperError = 'Helper unavailable right now.';
+		} finally {
+			helperLoading = false;
+		}
+	}
+
+	function dismissHelper() {
+		helperAdvice = null;
+		helperError = null;
+	}
 	// Hovering a hand tile lights up every matching tile in the rivers and your own
 	// discards — a reading aid (and furiten cue: a wait you've already discarded).
 	let hoveredCode = $state<number | null>(null);
@@ -310,6 +341,9 @@
 
 				<div class="player-actions">
 					{#if $gameState.phase === 'player_discard'}
+						<button class="action-btn helper-btn" onclick={askHelper} disabled={helperLoading}>
+							{helperLoading ? 'Thinking…' : 'Helper 助言'}
+						</button>
 						{#if $gameState.pendingTsumo}
 							<button class="action-btn tsumo-btn" onclick={declareTsumo}>Tsumo 自摸</button>
 						{:else}
@@ -381,6 +415,27 @@
 						{/each}
 						<button class="claim-btn btn-pass" onclick={passClaim}>Pass スキップ</button>
 					</div>
+				</div>
+			{/if}
+
+			<!-- In-round AI helper — non-blocking docked panel -->
+			{#if helperAdvice || helperError}
+				<div class="helper-panel">
+					<div class="helper-head">
+						<span class="helper-title">助言 — Coach</span>
+						<button class="helper-close" onclick={dismissHelper} aria-label="Dismiss">✕</button>
+					</div>
+					{#if helperError}
+						<p class="helper-error">{helperError}</p>
+					{:else if helperAdvice}
+						<div class="helper-discard">
+							Discard <strong>{helperAdvice.discard}</strong>
+						</div>
+						<p class="helper-reason">{helperAdvice.reasoning}</p>
+						{#if helperAdvice.plan}
+							<p class="helper-plan"><span class="helper-lbl">Plan</span> {helperAdvice.plan}</p>
+						{/if}
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -993,6 +1048,89 @@
 	.riichi-btn.armed {
 		background: #f0c030;
 		box-shadow: 0 0 0 2px #f0c030;
+	}
+
+	.helper-btn {
+		background: #2a4d6e;
+	}
+	.helper-btn:hover {
+		background: #21405c;
+	}
+	.helper-btn:disabled {
+		opacity: 0.7;
+		cursor: default;
+	}
+
+	/* ── In-round helper panel — non-blocking, docked bottom-left of the stage ── */
+	.helper-panel {
+		position: absolute;
+		left: calc(var(--u) * 3);
+		bottom: calc(var(--u) * 18);
+		z-index: 40;
+		width: calc(var(--u) * 36);
+		max-width: 90vw;
+		display: flex;
+		flex-direction: column;
+		gap: calc(var(--u) * 0.8);
+		padding: calc(var(--u) * 1.4) calc(var(--u) * 1.6);
+		background: rgba(16, 20, 26, 0.97);
+		border: 1px solid #2f3b4c;
+		border-left: 3px solid #3f6f9e;
+		border-radius: calc(var(--u) * 1.2);
+		box-shadow: 0 calc(var(--u) * 1) calc(var(--u) * 3) rgba(0, 0, 0, 0.6);
+	}
+	.helper-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: calc(var(--u) * 1);
+	}
+	.helper-title {
+		font-family: 'Noto Serif JP', serif;
+		font-size: calc(var(--u) * 1.6);
+		color: #9fc3e6;
+	}
+	.helper-close {
+		background: none;
+		border: none;
+		color: #6a7686;
+		cursor: pointer;
+		font-size: calc(var(--u) * 1.6);
+		line-height: 1;
+		padding: 0;
+	}
+	.helper-close:hover {
+		color: #cfd8e2;
+	}
+	.helper-discard {
+		font-size: calc(var(--u) * 1.7);
+		color: #cfc7bb;
+	}
+	.helper-discard strong {
+		color: #fff;
+		font-size: calc(var(--u) * 2);
+	}
+	.helper-reason {
+		margin: 0;
+		font-size: calc(var(--u) * 1.5);
+		line-height: 1.45;
+		color: #b7ada0;
+	}
+	.helper-plan {
+		margin: 0;
+		font-size: calc(var(--u) * 1.45);
+		color: #97b8d6;
+	}
+	.helper-lbl {
+		font-size: calc(var(--u) * 1.2);
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: #6a7686;
+	}
+	.helper-error {
+		margin: 0;
+		font-size: calc(var(--u) * 1.5);
+		color: #c41e3a;
 	}
 
 	/* ── Claim panel — non-blocking, docked bottom-right of the stage ───── */
