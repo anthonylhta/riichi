@@ -17,10 +17,13 @@ import {
 	stepAiTurn
 } from '$lib/game/engine';
 import type { TileCode } from '$lib/game/tiles';
+import { recordRound, type RoundRecord } from '$lib/game/review';
 
 export const gameState = writable<GameState | null>(null);
 export const gameLoading = writable(false);
 export const gameError = writable<string | null>(null);
+// Per-round log accumulated across the game, for the post-game overview.
+export const gameLog = writable<RoundRecord[]>([]);
 
 const AI_TURN_DELAY_MS = 500;
 
@@ -73,6 +76,7 @@ export async function startGame() {
 	gameLoading.set(true);
 	gameError.set(null);
 	try {
+		gameLog.set([]);
 		const initial = initGame();
 		await settleTurns(initial);
 	} catch (e) {
@@ -186,6 +190,9 @@ export async function nextRound() {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		// Capture the round that just finished before advancing.
+		const record = recordRound(current);
+		if (record) gameLog.update((log) => [...log, record]);
 		const next = continueGame(current);
 		await settleTurns(next);
 	} catch (e) {

@@ -14,13 +14,44 @@
 		claimDaiminkan,
 		declareAnkan,
 		declareKakan,
-		passClaim
+		passClaim,
+		gameLog
 	} from '$lib/stores/game';
 	import { tileLabel } from '$lib/game/tiles';
 	import { limitName } from '$lib/game/scoring';
 	import { isTenpaiAfterDiscard } from '$lib/game/ai';
 	import { getPlayerKanOptions } from '$lib/game/engine';
+	import { buildReviewPayload, type RoundRecord } from '$lib/game/review';
 	import Tile from '$lib/components/Tile.svelte';
+
+	// Post-game overview (Claude) — generated on demand from the flagged moments.
+	interface Overview {
+		narrative: string;
+		lessons: string[];
+	}
+	let overview = $state<Overview | null>(null);
+	let overviewLoading = $state(false);
+	let overviewError = $state<string | null>(null);
+
+	async function askOverview() {
+		if (overviewLoading) return;
+		overviewLoading = true;
+		overviewError = null;
+		try {
+			const payload = buildReviewPayload($gameLog as RoundRecord[]);
+			const res = await fetch('/api/overview', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(payload)
+			});
+			if (!res.ok) throw new Error('overview failed');
+			overview = (await res.json()) as Overview;
+		} catch {
+			overviewError = 'Review unavailable right now.';
+		} finally {
+			overviewLoading = false;
+		}
+	}
 
 	let selectedTileId = $state<number | null>(null);
 	let riichiArmed = $state(false);
@@ -438,6 +469,27 @@
 							</div>
 						{/each}
 					</div>
+
+					<!-- Post-game overview (Claude) — on demand -->
+					{#if overview}
+						<div class="overview">
+							<p class="overview-narrative">{overview.narrative}</p>
+							{#if overview.lessons.length}
+								<ul class="overview-lessons">
+									{#each overview.lessons as lesson, li (li)}
+										<li>{lesson}</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					{:else if overviewError}
+						<p class="overview-error">{overviewError}</p>
+					{:else}
+						<button class="action-btn review-btn" onclick={askOverview} disabled={overviewLoading}>
+							{overviewLoading ? 'Reviewing…' : 'Review this game 講評'}
+						</button>
+					{/if}
+
 					<button class="action-btn" onclick={startGame}>New Game</button>
 				</div>
 			</div>
@@ -1049,6 +1101,52 @@
 		padding: 2rem;
 		text-align: center;
 		min-width: 280px;
+		max-width: 30rem;
+	}
+
+	/* Post-game overview */
+	.review-btn {
+		background: #2a4d6e;
+		margin-bottom: 0.75rem;
+	}
+	.review-btn:hover {
+		background: #21405c;
+	}
+	.review-btn:disabled {
+		opacity: 0.7;
+		cursor: default;
+	}
+	.overview {
+		text-align: left;
+		border: 1px solid #2a2724;
+		border-left: 3px solid #3f6f9e;
+		border-radius: 6px;
+		background: rgba(0, 0, 0, 0.3);
+		padding: 0.9rem 1.1rem;
+		margin-bottom: 1rem;
+	}
+	.overview-narrative {
+		margin: 0 0 0.6rem;
+		font-size: 0.92rem;
+		line-height: 1.5;
+		color: #cfc7bb;
+	}
+	.overview-lessons {
+		margin: 0;
+		padding-left: 1.1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+	.overview-lessons li {
+		font-size: 0.88rem;
+		line-height: 1.4;
+		color: #b7ada0;
+	}
+	.overview-error {
+		color: #c41e3a;
+		font-size: 0.9rem;
+		margin: 0 0 1rem;
 	}
 
 	.win-announcement {
