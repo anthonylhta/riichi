@@ -251,7 +251,7 @@
 								disabled={$gameState.phase !== 'player_discard' ||
 									(riichiLocked ? !isDrawn : riichiActive && !wouldTriggerRiichi(t.id))}
 								riichiTrigger={riichiActive && wouldTriggerRiichi(t.id)}
-								dimmed={riichiLocked && !isDrawn}
+								dimmed={riichiActive && !wouldTriggerRiichi(t.id)}
 								highlight={!riichiLocked && hoveredCode === t.code}
 								onclick={() => handleTileClick(t.id)}
 								onmouseenter={() => {
