@@ -25,3 +25,12 @@ export const gameMoves = pgTable('game_moves', {
 	handSnapshot: jsonb('hand_snapshot'),
 	createdAt: timestamp('created_at').defaultNow().notNull()
 });
+
+// One shared riichi puzzle per day, cached so Claude generates it only once.
+// `date` is the UTC 'YYYY-MM-DD' key; `puzzle` holds the full puzzle payload.
+export const handOfTheDay = pgTable('hand_of_the_day', {
+	date: text('date').primaryKey(),
+	puzzle: jsonb('puzzle').notNull(),
+	model: text('model').notNull(),
+	createdAt: timestamp('created_at').defaultNow().notNull()
+});

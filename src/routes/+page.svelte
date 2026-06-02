@@ -17,6 +17,10 @@
 			<span class="play-en">Play</span>
 			<span class="play-jp">対局開始</span>
 		</a>
+
+		<a href="/hand-of-the-day" class="hotd-link">
+			Hand of the Day <span class="hotd-jp">今日の手牌</span>
+		</a>
 	</main>
 
 	<footer class="landing-footer">
@@ -192,6 +196,27 @@
 
 	.play-btn:active {
 		transform: translateY(0);
+	}
+
+	.hotd-link {
+		margin-top: 1rem;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		color: #9a9286;
+		text-decoration: none;
+		font-size: 0.85rem;
+		letter-spacing: 0.04em;
+		border-bottom: 1px solid transparent;
+		transition: color 0.18s ease;
+	}
+	.hotd-link:hover {
+		color: #e8e0d5;
+	}
+	.hotd-jp {
+		font-family: 'Noto Serif JP', serif;
+		font-size: 0.75rem;
+		color: #c41e3a;
 	}
 
 	.landing-footer {
