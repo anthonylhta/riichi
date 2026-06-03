@@ -42,8 +42,11 @@ function anthropic(): Anthropic {
 	return client;
 }
 
-function utcDate(): string {
-	return new Date().toISOString().slice(0, 10);
+// The daily puzzle is keyed on the Sydney calendar day, so it rolls over at
+// Sydney midnight (not UTC midnight). 'en-CA' formats as ISO YYYY-MM-DD, and the
+// Australia/Sydney time zone handles AEST/AEDT (daylight saving) automatically.
+function sydneyDate(): string {
+	return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date());
 }
 
 // ── Claude call 1: invent a hand ────────────────────────────────────────────
@@ -224,7 +227,7 @@ async function generatePuzzle(date: string): Promise<{ puzzle: Puzzle; model: st
 // onConflictDoNothing handles the race where two first-visitors generate at once.
 export async function getOrCreateToday(): Promise<StoredPuzzle> {
 	const db = getDb();
-	const date = utcDate();
+	const date = sydneyDate();
 
 	const existing = await db.select().from(handOfTheDay).where(eq(handOfTheDay.date, date)).limit(1);
 	if (existing.length) {
