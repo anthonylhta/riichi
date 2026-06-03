@@ -118,7 +118,15 @@ export function continueGame(state: GameState): GameState {
 	let nextRound = state.round;
 
 	if (result === null) {
+		// Exhaustive draw: honba always advances, but the dealer keeps the deal
+		// (renchan) only if tenpai. A noten dealer passes the deal and the round
+		// advances — otherwise a noten draw repeats the same hand forever.
 		nextHonba++;
+		const dealerTenpai = state.exhaustiveDrawResult?.tenpaiSeats.includes(state.dealer) ?? false;
+		if (!dealerTenpai) {
+			nextDealer = ((state.dealer + 1) % 4) as Seat;
+			nextRound++;
+		}
 	} else if (result.winner === state.dealer) {
 		nextHonba++;
 	} else {
@@ -127,7 +135,8 @@ export function continueGame(state: GameState): GameState {
 		nextRound++;
 	}
 
-	const bust = state.players.some((p) => p.score <= 0);
+	// MJ Soul tobi: busting is a strictly-negative score; exactly 0 stays alive.
+	const bust = state.players.some((p) => p.score < 0);
 	if (nextRound > 4 || bust) {
 		return { ...state, phase: 'game_end' };
 	}
