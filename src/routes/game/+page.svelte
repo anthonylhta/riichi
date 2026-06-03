@@ -299,6 +299,14 @@
 
 			<!-- Your hand + melds + actions -->
 			<div class="player-area">
+				{#if $gameState.phase === 'player_discard'}
+					<!-- Helper sits off to the side so it never breaks the centred discard hint -->
+					<div class="helper-launch">
+						<button class="action-btn helper-btn" onclick={askHelper} disabled={helperLoading}>
+							{helperLoading ? 'Thinking…' : 'Helper 助言'}
+						</button>
+					</div>
+				{/if}
 				<div class="player-hand-row">
 					<div class="player-hand">
 						{#each $gameState.players[0].hand as t, i (t.id)}
@@ -341,9 +349,6 @@
 
 				<div class="player-actions">
 					{#if $gameState.phase === 'player_discard'}
-						<button class="action-btn helper-btn" onclick={askHelper} disabled={helperLoading}>
-							{helperLoading ? 'Thinking…' : 'Helper 助言'}
-						</button>
 						{#if $gameState.pendingTsumo}
 							<button class="action-btn tsumo-btn" onclick={declareTsumo}>Tsumo 自摸</button>
 						{:else}
@@ -968,11 +973,22 @@
 
 	/* ── Your hand ─────────────────────────────────────────────────────── */
 	.player-area {
+		position: relative;
 		flex: none;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		gap: calc(var(--u) * 1);
+	}
+
+	/* Helper button floats to the left of the hand so the centred "click to
+	   discard" hint in .player-actions stays symmetric. */
+	.helper-launch {
+		position: absolute;
+		left: calc(var(--u) * 2);
+		top: 50%;
+		transform: translateY(-50%);
+		z-index: 2;
 	}
 
 	.player-hand-row {
