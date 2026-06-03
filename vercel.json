@@ -1,0 +1,8 @@
+{
+	"crons": [
+		{
+			"path": "/api/cron/hand-of-the-day",
+			"schedule": "5 0 * * *"
+		}
+	]
+}
