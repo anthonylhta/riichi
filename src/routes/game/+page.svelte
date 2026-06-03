@@ -173,6 +173,10 @@
 				})
 			: ['You', 'South', 'West', 'North']
 	);
+
+	// Rounds 1–4 are East (東); 5–8 are South (南) sudden-death overtime.
+	let roundWindKanji = $derived(($gameState?.round ?? 1) <= 4 ? WIND_KANJI[0] : WIND_KANJI[1]);
+	let roundNumber = $derived(((($gameState?.round ?? 1) - 1) % 4) + 1);
 </script>
 
 <!-- A seat's hand block: wind/name/score chip, concealed hand, melds.
@@ -232,7 +236,7 @@
 		<div class="stage">
 			<!-- Header -->
 			<header class="game-header">
-				<span class="round-label">{WIND_KANJI[0]} {$gameState.round}</span>
+				<span class="round-label">{roundWindKanji} {roundNumber}</span>
 				{#if $gameState.honba > 0}
 					<span class="honba">{$gameState.honba} 本場</span>
 				{/if}
@@ -255,7 +259,7 @@
 					<div class="river-slot river-left">{@render seatRiver(3)}</div>
 
 					<div class="center-board">
-						<div class="center-round">{WIND_KANJI[0]}{$gameState.round}</div>
+						<div class="center-round">{roundWindKanji}{roundNumber}</div>
 						{#if $gameState.honba > 0}
 							<div class="center-honba">{$gameState.honba} 本場</div>
 						{/if}

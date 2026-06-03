@@ -596,3 +596,62 @@ describe('continueGame — bust threshold (tobi)', () => {
 		expect(next.phase).not.toBe('game_end');
 	});
 });
+
+describe('continueGame — 30k target + sudden-death overtime', () => {
+	const win = (winner: Seat, loser: Seat): RoundResult => ({
+		winner,
+		winType: 'ron',
+		loser,
+		han: 3,
+		fu: 30,
+		score: 3900,
+		yaku: [],
+		pointChanges: [0, 0, 0, 0]
+	});
+
+	// round_end after a win, with explicit scores. `dealer` defaults to the
+	// last East seat (3) so a non-dealer win passes the deal past East-4.
+	const endState = (
+		round: number,
+		scores: [number, number, number, number],
+		result: RoundResult,
+		dealer: Seat = 3
+	) =>
+		makeState({
+			phase: 'round_end',
+			round,
+			dealer,
+			roundResult: result,
+			players: scores.map((s, i) => makePlayer(i, { score: s })) as GameState['players']
+		});
+
+	it('ends at East-4 when a player has reached the 30k target', () => {
+		// East-4, non-dealer (seat 0) wins; leader is at/over 30k.
+		const next = continueGame(endState(4, [35000, 25000, 22000, 18000], win(0, 1)));
+		expect(next.phase).toBe('game_end');
+	});
+
+	it('goes to South overtime when nobody has 30k at East-4', () => {
+		const next = continueGame(endState(4, [28000, 27000, 25000, 20000], win(0, 1)));
+		expect(next.phase).not.toBe('game_end');
+		expect(next.round).toBe(5); // South-1
+	});
+
+	it('ends in overtime as soon as someone reaches 30k', () => {
+		// South-1 (round 5), non-dealer wins; leader (seat 0) is over the target.
+		const next = continueGame(endState(5, [31000, 24000, 25000, 20000], win(1, 0), 0));
+		expect(next.phase).toBe('game_end');
+	});
+
+	it('keeps playing overtime while everyone is still under 30k', () => {
+		const next = continueGame(endState(5, [29000, 26000, 25000, 20000], win(1, 0), 0));
+		expect(next.phase).not.toBe('game_end');
+		expect(next.round).toBe(6); // South-2
+	});
+
+	it('caps overtime at South-4 — game ends even on a dealer renchan under target', () => {
+		// South-4 (round 8), dealer (seat 0) wins → would renchan forever otherwise.
+		const next = continueGame(endState(8, [29000, 26000, 25000, 20000], win(0, 1), 0));
+		expect(next.phase).toBe('game_end');
+	});
+});
