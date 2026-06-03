@@ -7,7 +7,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '$env/dynamic/private';
 import { analyzeHand } from './efficiency';
-import { toEffStr, doraFromIndicator } from '$lib/game/tiles';
+import { tileText, humanizeHonors, doraFromIndicator } from '$lib/game/tiles';
 import type { TileCode } from '$lib/game/tiles';
 import type { HelperView, HelperAdvice, HelperMeld, HelperSeatView } from '$lib/game/helper';
 
@@ -19,15 +19,15 @@ function anthropic(): Anthropic {
 	return client;
 }
 
-const str = (codes: TileCode[]) => (codes.length ? codes.map(toEffStr).join(' ') : '—');
+const str = (codes: TileCode[]) => (codes.length ? codes.map(tileText).join(' ') : '—');
 const meldStr = (melds: HelperMeld[]) =>
 	melds.length
-		? melds.map((m) => `${m.type}(${m.tiles.map(toEffStr).join('')})`).join(', ')
+		? melds.map((m) => `${m.type}(${m.tiles.map(tileText).join(' ')})`).join(', ')
 		: 'none';
 
 function seatLine(s: HelperSeatView): string {
 	const who = s.isYou ? 'You' : `Seat ${s.seat}`;
-	const wind = toEffStr(s.wind);
+	const wind = tileText(s.wind);
 	const riichi = s.isRiichi ? ' [RIICHI]' : '';
 	return `${who} (${wind}, ${s.score})${riichi}: discards [${str(s.discards)}]; melds ${meldStr(s.melds)}`;
 }
@@ -39,7 +39,7 @@ function efficiencyBlock(view: HelperView): string {
 	const a = analyzeHand(view.hand);
 	const top = a.ranked
 		.slice(0, 6)
-		.map((o) => `${toEffStr(o.code)} → ${o.shanten}-shanten, ${o.ukeire} ukeire`)
+		.map((o) => `${tileText(o.code)} → ${o.shanten}-shanten, ${o.ukeire} ukeire`)
 		.join('\n  ');
 	return `\nEfficiency analysis (mahjong-tile-efficiency, authoritative for raw speed):
   ${top}
@@ -48,7 +48,7 @@ function efficiencyBlock(view: HelperView): string {
 
 const SYSTEM = `You are a riichi mahjong coach giving live, in-game advice. You see exactly what the player sees — your own hand, everyone's discards and called melds, the dora indicators, scores, and riichi declarations — and nothing hidden (no opponents' concealed tiles, no wall order). Mahjong Soul defaults.
 
-Give ONE clear recommendation for the player's current decision. Weigh efficiency, yaku and value, dora, the round/score situation, and safety against any riichi. If an efficiency analysis is provided, treat its numbers as authoritative for raw speed, but you decide the final pick — value or safety can outrank pure ukeire, and say so when it does. Teach: be concrete and brief, use tile notation like "3p". Honors are 1z–7z (1z=East … 4z=North, 5z=White, 6z=Green, 7z=Red dragon).`;
+Give ONE clear recommendation for the player's current decision. Weigh efficiency, yaku and value, dora, the round/score situation, and safety against any riichi. If an efficiency analysis is provided, treat its numbers as authoritative for raw speed, but you decide the final pick — value or safety can outrank pure ukeire, and say so when it does. Teach: be concrete and brief. Use standard notation like "3p" for number tiles. Refer to honor tiles by their English name — East, South, West, North for the winds, and White dragon, Green dragon, Red dragon — never the "1z"/"5z" notation, in the discard field or anywhere in your reasoning.`;
 
 const SCHEMA = {
 	type: 'object',
@@ -67,7 +67,7 @@ function textOf(message: Anthropic.Message): string {
 }
 
 export async function getHelperAdvice(view: HelperView): Promise<HelperAdvice> {
-	const dora = view.doraIndicators.map((c) => toEffStr(doraFromIndicator(c)));
+	const dora = view.doraIndicators.map((c) => tileText(doraFromIndicator(c)));
 	const prompt = `Current situation — East ${view.round}, honba ${view.honba}. ${view.wallCount} tiles left in the wall.
 Dora indicator(s): ${str(view.doraIndicators)} (so dora is: ${dora.join(' ') || '—'}).
 
@@ -96,9 +96,11 @@ What should I do? Recommend the single best tile to discard now (tile notation) 
 	} as any);
 
 	const parsed = JSON.parse(textOf(res)) as HelperAdvice;
+	// Belt-and-braces: if the model still slips in raw "Nz" notation, spell it out
+	// so honors never reach the UI as "5z" or a blank haku tile.
 	return {
-		discard: String(parsed.discard ?? '—'),
-		reasoning: String(parsed.reasoning ?? ''),
-		plan: String(parsed.plan ?? '')
+		discard: humanizeHonors(String(parsed.discard ?? '—')),
+		reasoning: humanizeHonors(String(parsed.reasoning ?? '')),
+		plan: humanizeHonors(String(parsed.plan ?? ''))
 	};
 }

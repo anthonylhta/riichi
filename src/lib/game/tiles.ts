@@ -91,6 +91,36 @@ export function tileLabel(code: TileCode): string {
 	return `${val}${suffix}`;
 }
 
+// Spelled-out English honor names (index 1–7 = 1z–7z). Used when talking to the
+// AI helper/coach so honors are named (East, White dragon) rather than the opaque
+// "Nz" notation — which the model both mis-reads and mis-names.
+const HONOR_NAMES = [
+	'',
+	'East',
+	'South',
+	'West',
+	'North',
+	'White dragon',
+	'Green dragon',
+	'Red dragon'
+];
+
+export function honorName(code: TileCode): string {
+	return isHonor(code) ? HONOR_NAMES[code - 27] : '';
+}
+
+// Model-facing label: standard notation for number tiles ("3p"), spelled-out name
+// for honors ("West", "White dragon"). Never blank (haku reads "White dragon").
+export function tileText(code: TileCode): string {
+	return isHonor(code) ? honorName(code) : toEffStr(code);
+}
+
+// Replace any raw honor notation ("5z") in free text with its English name, so
+// the coach's reasoning never leaks "Nz" tokens (or a blank for haku) to the UI.
+export function humanizeHonors(text: string): string {
+	return text.replace(/([1-7])z\b/g, (m, d) => HONOR_NAMES[Number(d)] || m);
+}
+
 export function suitClass(code: TileCode): string {
 	const suit = getSuit(code);
 	if (suit === 'dragon') {
