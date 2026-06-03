@@ -14,8 +14,15 @@ import { checkWin } from './scoring';
 
 const WINDS: TileCode[] = [TC.EAST, TC.SOUTH, TC.WEST, TC.NORTH];
 
-function getRoundWind(): TileCode {
-	return TC.EAST;
+// Game-end rule constants (Mahjong Soul tonpuusen defaults).
+const TARGET_SCORE = 30000; // "return" points — needed to end the game at the last hand
+const LAST_REGULAR_ROUND = 4; // East-4 is the nominal final hand
+const ABSOLUTE_LAST_ROUND = 8; // South-4 caps sudden-death overtime
+
+// Rounds 1–4 are East, 5–8 are South (sudden-death overtime). The round wind
+// shifts to South in overtime, so South tiles become yakuhai there.
+function getRoundWind(round: number): TileCode {
+	return round <= LAST_REGULAR_ROUND ? TC.EAST : TC.SOUTH;
 }
 
 function getSeatWind(seat: Seat, dealer: Seat): TileCode {
@@ -137,7 +144,20 @@ export function continueGame(state: GameState): GameState {
 
 	// MJ Soul tobi: busting is a strictly-negative score; exactly 0 stays alive.
 	const bust = state.players.some((p) => p.score < 0);
-	if (nextRound > 4 || bust) {
+	if (bust) {
+		return { ...state, phase: 'game_end' };
+	}
+
+	// Points target + sudden-death overtime. Once we're past the nominal last hand
+	// (East-4's dealer has passed, or we're already in South overtime), the game
+	// ends as soon as a hand finishes with someone at/over the target. If nobody
+	// has reached it, play continues into South (sudden death) — capped at South-4,
+	// after which the leader simply wins regardless of the target.
+	const topScore = Math.max(...state.players.map((p) => p.score));
+	if (nextRound > LAST_REGULAR_ROUND && topScore >= TARGET_SCORE) {
+		return { ...state, phase: 'game_end' };
+	}
+	if (state.round >= ABSOLUTE_LAST_ROUND) {
 		return { ...state, phase: 'game_end' };
 	}
 
@@ -239,7 +259,7 @@ export async function checkTsumo(
 		akaCount: countAka(player.hand) + countAka(meldTiles(player)),
 		ronTileCode: null,
 		seatWind: getSeatWind(seat, state.dealer),
-		roundWind: getRoundWind()
+		roundWind: getRoundWind(state.round)
 	});
 
 	if (!result.isWin) return null;
@@ -297,7 +317,7 @@ export async function checkRon(
 		akaCount: countAka(player.hand) + countAka(meldTiles(player)) + countAka([discardTile]),
 		ronTileCode: discardTile.code,
 		seatWind: getSeatWind(claimantSeat, state.dealer),
-		roundWind: getRoundWind()
+		roundWind: getRoundWind(state.round)
 	});
 
 	if (!result.isWin) return null;
@@ -1014,7 +1034,7 @@ async function computeOwnDiscardFuriten(state: GameState, seat: Seat): Promise<b
 			isTsumo: false,
 			ronTileCode: code,
 			seatWind: getSeatWind(seat, state.dealer),
-			roundWind: getRoundWind()
+			roundWind: getRoundWind(state.round)
 		});
 		if (result.isWin) return true;
 	}
