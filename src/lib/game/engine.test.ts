@@ -21,7 +21,8 @@ import {
 	humanDeclareRon,
 	humanPassClaim,
 	humanDiscard,
-	getHumanClaimOptions
+	getHumanClaimOptions,
+	continueGame
 } from './engine';
 import { getShanten } from './ai';
 import type { GameState, PlayerState, RoundResult, Seat } from './types';
@@ -520,5 +521,78 @@ describe('getHumanClaimOptions — riichi locks the hand', () => {
 	it('offers no chi/pon/kan once in riichi', () => {
 		const options = getHumanClaimOptions(makeClaimState(true), tile(23, 99), 1);
 		expect(options).toEqual([]);
+	});
+});
+
+// ─── continueGame — game-end & renchan rules ─────────────────────────────────
+
+describe('continueGame — exhaustive draw renchan', () => {
+	// A round_end state reached via exhaustive draw (roundResult null).
+	const drawState = (dealer: Seat, tenpaiSeats: Seat[], overrides: Partial<GameState> = {}) =>
+		makeState({
+			phase: 'round_end',
+			round: 1,
+			honba: 0,
+			dealer,
+			roundResult: null,
+			exhaustiveDrawResult: { tenpaiSeats, pointChanges: [0, 0, 0, 0] },
+			...overrides
+		});
+
+	it('keeps the dealer and bumps honba when the dealer is tenpai', () => {
+		const next = continueGame(drawState(0, [0]));
+		expect(next.dealer).toBe(0);
+		expect(next.round).toBe(1);
+		expect(next.honba).toBe(1);
+	});
+
+	it('passes the deal and advances the round when the dealer is noten', () => {
+		const next = continueGame(drawState(0, [1, 2]));
+		expect(next.dealer).toBe(1);
+		expect(next.round).toBe(2);
+		expect(next.honba).toBe(1); // honba still advances on a draw
+	});
+
+	it('passes the deal when nobody is tenpai', () => {
+		const next = continueGame(drawState(0, []));
+		expect(next.dealer).toBe(1);
+		expect(next.round).toBe(2);
+	});
+});
+
+describe('continueGame — bust threshold (tobi)', () => {
+	const winByNonDealer = (): RoundResult => ({
+		winner: 1,
+		winType: 'ron',
+		loser: 0,
+		han: 4,
+		fu: 30,
+		score: 8000,
+		yaku: [],
+		pointChanges: [-8000, 8000, 0, 0]
+	});
+
+	const stateWithScores = (scores: [number, number, number, number]) =>
+		makeState({
+			phase: 'round_end',
+			round: 1,
+			dealer: 0,
+			roundResult: winByNonDealer(),
+			players: [
+				makePlayer(0, { score: scores[0] }),
+				makePlayer(1, { score: scores[1] }),
+				makePlayer(2, { score: scores[2] }),
+				makePlayer(3, { score: scores[3] })
+			] as GameState['players']
+		});
+
+	it('ends the game when a player is below zero', () => {
+		const next = continueGame(stateWithScores([-100, 33100, 25000, 17000]));
+		expect(next.phase).toBe('game_end');
+	});
+
+	it('does NOT bust at exactly zero — play continues', () => {
+		const next = continueGame(stateWithScores([0, 33000, 25000, 17000]));
+		expect(next.phase).not.toBe('game_end');
 	});
 });
