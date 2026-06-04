@@ -434,17 +434,19 @@
 						<span class="helper-title">助言 — Coach</span>
 						<button class="helper-close" onclick={dismissHelper} aria-label="Dismiss">✕</button>
 					</div>
-					{#if helperError}
-						<p class="helper-error">{helperError}</p>
-					{:else if helperAdvice}
-						<div class="helper-discard">
-							Discard <strong>{helperAdvice.discard}</strong>
-						</div>
-						<p class="helper-reason">{helperAdvice.reasoning}</p>
-						{#if helperAdvice.plan}
-							<p class="helper-plan"><span class="helper-lbl">Plan</span> {helperAdvice.plan}</p>
+					<div class="helper-body">
+						{#if helperError}
+							<p class="helper-error">{helperError}</p>
+						{:else if helperAdvice}
+							<div class="helper-discard">
+								Discard <strong>{helperAdvice.discard}</strong>
+							</div>
+							<p class="helper-reason">{helperAdvice.reasoning}</p>
+							{#if helperAdvice.plan}
+								<p class="helper-plan"><span class="helper-lbl">Plan</span> {helperAdvice.plan}</p>
+							{/if}
 						{/if}
-					{/if}
+					</div>
 				</div>
 			{/if}
 		</div>
@@ -1089,6 +1091,9 @@
 		z-index: 40;
 		width: calc(var(--u) * 36);
 		max-width: 90vw;
+		/* Cap the height so a long response can never grow the panel past the close
+		   button — the head stays pinned and the body scrolls inside (see UI_09). */
+		max-height: calc(var(--u) * 40);
 		display: flex;
 		flex-direction: column;
 		gap: calc(var(--u) * 0.8);
@@ -1100,10 +1105,18 @@
 		box-shadow: 0 calc(var(--u) * 1) calc(var(--u) * 3) rgba(0, 0, 0, 0.6);
 	}
 	.helper-head {
+		flex-shrink: 0;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: calc(var(--u) * 1);
+	}
+	.helper-body {
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: calc(var(--u) * 0.8);
+		min-height: 0;
 	}
 	.helper-title {
 		font-family: 'Noto Serif JP', serif;

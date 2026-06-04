@@ -7,6 +7,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '$env/dynamic/private';
 import { analyzeHand } from './efficiency';
+import { clamp, LIMITS } from './helperText';
 import { tileText, humanizeHonors, doraFromIndicator } from '$lib/game/tiles';
 import type { TileCode } from '$lib/game/tiles';
 import type { HelperView, HelperAdvice, HelperMeld, HelperSeatView } from '$lib/game/helper';
@@ -48,7 +49,9 @@ function efficiencyBlock(view: HelperView): string {
 
 const SYSTEM = `You are a riichi mahjong coach giving live, in-game advice. You see exactly what the player sees — your own hand, everyone's discards and called melds, the dora indicators, scores, and riichi declarations — and nothing hidden (no opponents' concealed tiles, no wall order). Mahjong Soul defaults.
 
-Give ONE clear recommendation for the player's current decision. Weigh efficiency, yaku and value, dora, the round/score situation, and safety against any riichi. If an efficiency analysis is provided, treat its numbers as authoritative for raw speed, but you decide the final pick — value or safety can outrank pure ukeire, and say so when it does. Teach: be concrete and brief. Use standard notation like "3p" for number tiles. Refer to honor tiles by their English name — East, South, West, North for the winds, and White dragon, Green dragon, Red dragon — never the "1z"/"5z" notation, in the discard field or anywhere in your reasoning.`;
+Give ONE clear recommendation for the player's current decision. Weigh efficiency, yaku and value, dora, the round/score situation, and safety against any riichi. If an efficiency analysis is provided, treat its numbers as authoritative for raw speed, but you decide the final pick — value or safety can outrank pure ukeire, and say so when it does. Teach: be concrete and brief. Use standard notation like "3p" for number tiles. Refer to honor tiles by their English name — East, South, West, North for the winds, and White dragon, Green dragon, Red dragon — never the "1z"/"5z" notation, in the discard field or anywhere in your reasoning.
+
+Keep it short — this is a live in-game tip docked in the corner, not an essay. "reasoning" must be at most two sentences; "plan" must be a single short line. Do not enumerate every tile or list alternatives at length.`;
 
 const SCHEMA = {
 	type: 'object',
@@ -99,8 +102,8 @@ What should I do? Recommend the single best tile to discard now (tile notation) 
 	// Belt-and-braces: if the model still slips in raw "Nz" notation, spell it out
 	// so honors never reach the UI as "5z" or a blank haku tile.
 	return {
-		discard: humanizeHonors(String(parsed.discard ?? '—')),
-		reasoning: humanizeHonors(String(parsed.reasoning ?? '')),
-		plan: humanizeHonors(String(parsed.plan ?? ''))
+		discard: clamp(humanizeHonors(String(parsed.discard ?? '—')), LIMITS.discard),
+		reasoning: clamp(humanizeHonors(String(parsed.reasoning ?? '')), LIMITS.reasoning),
+		plan: clamp(humanizeHonors(String(parsed.plan ?? '')), LIMITS.plan)
 	};
 }
