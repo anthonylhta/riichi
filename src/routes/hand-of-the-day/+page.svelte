@@ -11,6 +11,7 @@
 			<span class="jp">今日の手牌</span>
 			<h1>Hand of the Day</h1>
 		</div>
+		<span class="head-spacer" aria-hidden="true"></span>
 	</header>
 
 	{#await data.puzzle}
@@ -55,7 +56,13 @@
 
 	.hotd-head {
 		width: 100%;
-		display: flex;
+		/* 3-column grid so the title centres on the true page centre, matching the
+		   loading block and the resolved puzzle's .date (both centred on the full
+		   .hotd column). A plain flex row would centre the title in the space left
+		   over after the ← Menu link, shifting it right. The spacer column mirrors
+		   the back link's width so the centre column stays dead-centre. */
+		display: grid;
+		grid-template-columns: 1fr auto 1fr;
 		align-items: center;
 		gap: 1rem;
 	}
@@ -71,7 +78,6 @@
 	}
 
 	.title-block {
-		flex: 1;
 		text-align: center;
 	}
 	.title-block .jp {
