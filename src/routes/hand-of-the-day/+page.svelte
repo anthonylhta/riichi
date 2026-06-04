@@ -25,7 +25,12 @@
 		{#if loaded.error || !loaded.today}
 			<p class="error">{loaded.error ?? 'No puzzle available.'}</p>
 		{:else}
-			<PuzzleView today={loaded.today} />
+			<PuzzleView
+				today={loaded.today}
+				result={data.result}
+				streak={data.streak}
+				signedIn={data.signedIn}
+			/>
 		{/if}
 	{/await}
 </div>

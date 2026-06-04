@@ -1,6 +1,19 @@
+<script lang="ts">
+	import { Show, SignInButton, UserButton } from 'svelte-clerk';
+</script>
+
 <div class="landing">
 	<div class="bg-grain" aria-hidden="true"></div>
 	<span class="bg-kanji" aria-hidden="true">立直</span>
+
+	<div class="auth-nav">
+		<Show when="signed-out">
+			<SignInButton mode="modal" class="signin-btn">Sign in</SignInButton>
+		</Show>
+		<Show when="signed-in">
+			<UserButton />
+		</Show>
+	</div>
 
 	<main class="hero">
 		<div class="title-block">
@@ -24,7 +37,7 @@
 	</main>
 
 	<footer class="landing-footer">
-		<span>No account needed.</span>
+		<span>No account needed — sign in to track your daily-puzzle streak.</span>
 	</footer>
 </div>
 
@@ -46,6 +59,30 @@
 		overflow: hidden;
 		/* warm charcoal core fading to near-black at the edges (vignette) */
 		background: radial-gradient(ellipse 80% 70% at 50% 42%, #1b1512 0%, #120f0e 45%, #0b0a0a 100%);
+	}
+
+	.auth-nav {
+		position: absolute;
+		top: 1.25rem;
+		right: 1.5rem;
+		z-index: 3;
+	}
+	:global(.auth-nav .signin-btn) {
+		padding: 0.45rem 1.2rem;
+		background: transparent;
+		color: #cfc7bb;
+		border: 1px solid #3a352f;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition:
+			border-color 0.15s,
+			color 0.15s;
+	}
+	:global(.auth-nav .signin-btn:hover) {
+		border-color: #c41e3a;
+		color: #e8e0d5;
 	}
 
 	/* Subtle film grain so the flat black reads as a surface, not a void */
