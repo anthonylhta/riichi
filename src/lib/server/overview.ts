@@ -4,9 +4,17 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '$env/dynamic/private';
+import { clamp } from './textLimit';
 import type { ReviewPayload } from '$lib/game/review';
 
 const MODEL = 'claude-sonnet-4-6';
+
+// Hard ceilings on the model-authored review, so a verbose response can't grow the
+// game-end card past the viewport and push the "New Game" button off-screen (the
+// same failure mode as the helper panel — see textLimit.ts / UI_09). Both the
+// length of each string AND the number of lessons are capped server-side.
+const LIMITS = { narrative: 600, lesson: 200 } as const;
+const MAX_LESSONS = 4;
 
 let client: Anthropic | null = null;
 function anthropic(): Anthropic {
@@ -24,7 +32,7 @@ const SYSTEM = `You are a riichi mahjong coach reviewing a finished solo game �
 Write a short, honest, encouraging post-game review for the player:
 - A 2–3 sentence narrative of how the game went and where it turned.
 - 2–3 concrete, actionable lessons to improve, grounded in the moments given.
-Be specific (reference the rounds/events provided). Don't invent tiles or events that aren't in the data. Use "you" and a warm coaching tone.`;
+Be specific (reference the rounds/events provided). Don't invent tiles or events that aren't in the data. Use "you" and a warm coaching tone. Keep it tight: the narrative is at most three sentences, and give at most four short lessons (each one sentence) — this is a card on the game-over screen, not an essay.`;
 
 const SCHEMA = {
 	type: 'object',
@@ -66,7 +74,11 @@ Write the review.`;
 
 	const parsed = JSON.parse(textOf(res)) as Overview;
 	return {
-		narrative: String(parsed.narrative ?? ''),
-		lessons: Array.isArray(parsed.lessons) ? parsed.lessons.map(String) : []
+		narrative: clamp(String(parsed.narrative ?? ''), LIMITS.narrative),
+		// Cap both the count and the length of the lessons so the game-over card
+		// can't outgrow the viewport.
+		lessons: Array.isArray(parsed.lessons)
+			? parsed.lessons.slice(0, MAX_LESSONS).map((l) => clamp(String(l), LIMITS.lesson))
+			: []
 	};
 }
