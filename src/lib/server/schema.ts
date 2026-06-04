@@ -1,9 +1,39 @@
-import { pgTable, serial, text, integer, timestamp, jsonb } from 'drizzle-orm/pg-core';
+import {
+	pgTable,
+	serial,
+	text,
+	integer,
+	boolean,
+	timestamp,
+	jsonb,
+	unique
+} from 'drizzle-orm/pg-core';
 
+// One row per Clerk identity. `clerkId` is Clerk's user id (e.g. "user_123"); the
+// serial `id` stays the internal FK target so existing relations don't change.
 export const users = pgTable('users', {
 	id: serial('id').primaryKey(),
+	clerkId: text('clerk_id').notNull().unique(),
 	createdAt: timestamp('created_at').defaultNow().notNull()
 });
+
+// One Hand-of-the-Day attempt per user per day (the first answer locks the day).
+// `date` is the Sydney 'YYYY-MM-DD' key, matching the puzzle's own day boundary.
+// `correct` drives the streak: consecutive correct days keep it alive.
+export const puzzleResults = pgTable(
+	'puzzle_results',
+	{
+		id: serial('id').primaryKey(),
+		userId: integer('user_id')
+			.references(() => users.id)
+			.notNull(),
+		date: text('date').notNull(),
+		choiceCode: integer('choice_code').notNull(),
+		correct: boolean('correct').notNull(),
+		createdAt: timestamp('created_at').defaultNow().notNull()
+	},
+	(t) => [unique('puzzle_results_user_date').on(t.userId, t.date)]
+);
 
 export const games = pgTable('games', {
 	id: serial('id').primaryKey(),

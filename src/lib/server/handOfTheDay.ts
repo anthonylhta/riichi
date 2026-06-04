@@ -12,8 +12,10 @@ import { eq } from 'drizzle-orm';
 import { getDb } from './db';
 import { handOfTheDay } from './schema';
 import { analyzeHand } from './efficiency';
+import { sydneyDate } from './day';
 import { toEffStr, parseEffStr, isHonor } from '$lib/game/tiles';
 import type { TileCode } from '$lib/game/tiles';
+import type { PublicPuzzle, PuzzleAnswer } from '$lib/game/hotd';
 
 const MODEL = 'claude-opus-4-8';
 
@@ -36,17 +38,33 @@ export interface StoredPuzzle {
 	model: string;
 }
 
+// The answer-stripped puzzle (PublicPuzzle) and the revealed solution
+// (PuzzleAnswer) live in $lib/game/hotd so the client can share them.
+
+export function toPublicPuzzle(p: Puzzle): PublicPuzzle {
+	return {
+		hand: p.hand,
+		seatWind: p.seatWind,
+		roundWind: p.roundWind,
+		doraIndicator: p.doraIndicator,
+		question: p.question
+	};
+}
+
+export function toAnswer(p: Puzzle): PuzzleAnswer {
+	return {
+		bestDiscards: p.bestDiscards,
+		bestShanten: p.bestShanten,
+		ukeire: p.ukeire,
+		ukeireTiles: p.ukeireTiles,
+		explanation: p.explanation
+	};
+}
+
 let client: Anthropic | null = null;
 function anthropic(): Anthropic {
 	if (!client) client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 	return client;
-}
-
-// The daily puzzle is keyed on the Sydney calendar day, so it rolls over at
-// Sydney midnight (not UTC midnight). 'en-CA' formats as ISO YYYY-MM-DD, and the
-// Australia/Sydney time zone handles AEST/AEDT (daylight saving) automatically.
-function sydneyDate(): string {
-	return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date());
 }
 
 // ── Claude call 1: invent a hand ────────────────────────────────────────────
