@@ -7,12 +7,16 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '$env/dynamic/private';
 import { analyzeHand } from './efficiency';
-import { clamp, LIMITS } from './helperText';
+import { clamp } from './textLimit';
 import { tileText, humanizeHonors, doraFromIndicator } from '$lib/game/tiles';
 import type { TileCode } from '$lib/game/tiles';
 import type { HelperView, HelperAdvice, HelperMeld, HelperSeatView } from '$lib/game/helper';
 
 const MODEL = 'claude-sonnet-4-6';
+
+// Hard ceilings (chars) on each model-authored field, so a verbose response can't
+// blow up the docked panel (see UI_09 / textLimit.ts).
+const LIMITS = { discard: 40, reasoning: 320, plan: 160 } as const;
 
 let client: Anthropic | null = null;
 function anthropic(): Anthropic {

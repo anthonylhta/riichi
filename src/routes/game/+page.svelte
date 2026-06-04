@@ -1273,6 +1273,11 @@
 		text-align: center;
 		min-width: 280px;
 		max-width: 30rem;
+		/* Never taller than the viewport: a long Claude review scrolls inside the
+		   card instead of pushing the "New Game" button off-screen (see UI_09 for
+		   the same failure mode on the helper panel). */
+		max-height: calc(100dvh - 2rem);
+		overflow-y: auto;
 	}
 
 	/* Post-game overview */

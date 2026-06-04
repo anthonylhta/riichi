@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clamp, LIMITS } from './helperText';
+import { clamp } from './textLimit';
 
 describe('clamp', () => {
 	it('leaves short text untouched (no ellipsis)', () => {
@@ -31,9 +31,9 @@ describe('clamp', () => {
 		expect(out).toBe('superlongu…');
 	});
 
-	it('result never exceeds max + 1 (the ellipsis) for the configured limits', () => {
+	it('result never exceeds max + 1 (the ellipsis) across a range of limits', () => {
 		const blob = 'x '.repeat(500);
-		for (const max of Object.values(LIMITS)) {
+		for (const max of [40, 160, 200, 320, 600]) {
 			expect(clamp(blob, max).length).toBeLessThanOrEqual(max + 1);
 		}
 	});
