@@ -266,7 +266,9 @@ describe('humanPassClaim', () => {
 			players: [
 				makePlayer(0),
 				makePlayer(1),
-				makePlayer(2, { hand: [tile(23, 60), tile(23, 61), tile(9, 62)] }),
+				// Needs >3 concealed tiles so the pon leaves a discard + a legal hand
+				// (callKeepsLegalHand); a 3-tile fixture would now be a strand.
+				makePlayer(2, { hand: [tile(23, 60), tile(23, 61), tile(9, 62), tile(8, 63)] }),
 				makePlayer(3)
 			] as GameState['players']
 		});
