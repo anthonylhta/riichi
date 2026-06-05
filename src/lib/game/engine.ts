@@ -52,9 +52,13 @@ function initRound(
 	dealer: Seat,
 	round: number,
 	honba: number,
-	riichiBets = 0
+	riichiBets = 0,
+	// A pre-shuffled wall (136 tiles, deal order) can be injected to deterministically
+	// re-deal a round — this is what makes a game replayable (see replay.ts). When
+	// omitted we shuffle a fresh wall as usual.
+	wall?: GameTile[]
 ): GameState {
-	const shuffled = shuffleTiles(createWall());
+	const shuffled = wall ?? shuffleTiles(createWall());
 
 	const liveWall = shuffled.slice(0, 122);
 	const deadWall = shuffled.slice(122);
@@ -112,11 +116,11 @@ function initRound(
 	return drawTile(state, dealer);
 }
 
-export function initGame(): GameState {
-	return initRound([25000, 25000, 25000, 25000], 0, 1, 0);
+export function initGame(wall?: GameTile[]): GameState {
+	return initRound([25000, 25000, 25000, 25000], 0, 1, 0, 0, wall);
 }
 
-export function continueGame(state: GameState): GameState {
+export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	if (state.phase !== 'round_end') return state;
 
 	const result = state.roundResult;
@@ -164,7 +168,7 @@ export function continueGame(state: GameState): GameState {
 	const scores = state.players.map((p) => p.score) as [number, number, number, number];
 	// Carry riichi sticks over on exhaustive draw; they clear when someone wins
 	const carryBets = result === null ? state.riichiBets : 0;
-	return initRound(scores, nextDealer, nextRound, nextHonba, carryBets);
+	return initRound(scores, nextDealer, nextRound, nextHonba, carryBets, wall);
 }
 
 function applyExhaustiveDraw(state: GameState): GameState {
