@@ -12,10 +12,10 @@ import {
 	humanPassClaim,
 	humanDeclareAnkan,
 	humanDeclareKakan,
-	humanClaimDaiminkan,
-	getPlayerKanOptions,
-	stepAiTurn
+	humanClaimDaiminkan
 } from '$lib/game/engine';
+import { settle } from '$lib/game/autoplay';
+import { newReplayLog, wallFromState, type ReplayInput, type ReplayLog } from '$lib/game/replay';
 import type { TileCode } from '$lib/game/tiles';
 import { recordRound, type RoundRecord } from '$lib/game/review';
 
@@ -27,49 +27,43 @@ export const gameLog = writable<RoundRecord[]>([]);
 
 const AI_TURN_DELAY_MS = 500;
 
-function sleep(ms: number) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// ── Replay capture ──────────────────────────────────────────────────────────
+// Record each round's wall + every human input so a game (a freeze included) can
+// be reproduced via replayGame(). Mirrored to localStorage after every change so
+// a stuck game survives a reload and can be exported for debugging.
+const REPLAY_KEY = 'riichi:lastReplay';
+let replayLog: ReplayLog = newReplayLog();
 
-async function runUntilPlayerTurn(state: GameState): Promise<void> {
-	let s = state;
-	let safety = 0;
-	while (s.phase === 'ai_turn' && safety < 200) {
-		await sleep(AI_TURN_DELAY_MS);
-		s = await stepAiTurn(s);
-		gameState.set(s);
-		safety++;
+function mirrorReplay() {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		localStorage.setItem(REPLAY_KEY, JSON.stringify(replayLog));
+	} catch {
+		// Quota / serialization issues shouldn't break gameplay.
 	}
 }
 
-// Once in riichi the hand is locked, so each draw is tsumogiri'd automatically
-// (Mahjong-Soul style) — unless the draw wins (Tsumo) or offers a kan, where we
-// stop and let the player decide. Chains through the AI turns it triggers.
-async function autoTsumogiri(): Promise<void> {
-	let safety = 0;
-	while (safety < 200) {
-		const s = get(gameState);
-		if (!s || s.phase !== 'player_discard' || s.currentSeat !== 0) break;
-		const me = s.players[0];
-		if (!me.isRiichi || s.pendingTsumo) break;
-		const kan = getPlayerKanOptions(s);
-		if (kan.ankan.length > 0 || kan.kakan.length > 0) break;
-
-		await sleep(AI_TURN_DELAY_MS);
-		const drawn = me.hand[me.hand.length - 1]; // drawTile appends without re-sorting
-		const next = await humanDiscard(s, drawn.id, false);
-		gameState.set(next);
-		if (next.phase === 'ai_turn') await runUntilPlayerTurn(next);
-		safety++;
-	}
+function recordInput(input: ReplayInput) {
+	replayLog.inputs.push(input);
+	mirrorReplay();
 }
 
-// Set the state, run any AI turns, then handle riichi auto-tsumogiri. Every path
-// that can hand the turn back to the human goes through here.
+// The replay log of the current/last game — JSON-serializable. Use the console
+// hook `window.riichiReplay()` to copy a frozen game's log for a bug report.
+export function getReplayLog(): ReplayLog {
+	return replayLog;
+}
+
+if (typeof window !== 'undefined') {
+	(window as unknown as { riichiReplay: () => string }).riichiReplay = () =>
+		JSON.stringify(replayLog);
+}
+
+// Run the shared settle loop (AI turns + riichi auto-tsumogiri), committing each
+// step to the UI store with animation pacing. The replay harness drives the very
+// same loop (autoplay.ts) with no delay, so a replay reproduces live play exactly.
 async function settleTurns(state: GameState): Promise<void> {
-	gameState.set(state);
-	if (state.phase === 'ai_turn') await runUntilPlayerTurn(state);
-	await autoTsumogiri();
+	await settle(state, { delayMs: AI_TURN_DELAY_MS, onStep: (s) => gameState.set(s) });
 }
 
 export async function startGame() {
@@ -77,7 +71,10 @@ export async function startGame() {
 	gameError.set(null);
 	try {
 		gameLog.set([]);
+		replayLog = newReplayLog();
 		const initial = initGame();
+		replayLog.startWall = wallFromState(initial);
+		mirrorReplay();
 		await settleTurns(initial);
 	} catch (e) {
 		gameError.set(String(e));
@@ -91,6 +88,7 @@ export async function discard(tileId: number, declareRiichi = false) {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		recordInput({ t: 'discard', tileId, riichi: declareRiichi });
 		const next = await humanDiscard(current, tileId, declareRiichi);
 		await settleTurns(next);
 	} catch (e) {
@@ -102,6 +100,7 @@ export async function declareTsumo() {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		recordInput({ t: 'tsumo' });
 		const next = await humanDeclareTsumo(current);
 		gameState.set(next);
 	} catch (e) {
@@ -113,6 +112,7 @@ export async function declareRon() {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		recordInput({ t: 'ron' });
 		const next = await humanDeclareRon(current);
 		gameState.set(next);
 	} catch (e) {
@@ -124,6 +124,7 @@ export function claimPon(handTiles: GameTile[]) {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		recordInput({ t: 'pon', tileIds: handTiles.map((t) => t.id) });
 		const next = humanClaimPon(current, handTiles);
 		gameState.set(next);
 	} catch (e) {
@@ -135,6 +136,7 @@ export function claimChi(handTiles: GameTile[]) {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		recordInput({ t: 'chi', tileIds: handTiles.map((t) => t.id) });
 		const next = humanClaimChi(current, handTiles);
 		gameState.set(next);
 	} catch (e) {
@@ -146,6 +148,7 @@ export async function claimDaiminkan(handTiles: GameTile[]) {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		recordInput({ t: 'daiminkan', tileIds: handTiles.map((t) => t.id) });
 		const next = await humanClaimDaiminkan(current, handTiles);
 		await settleTurns(next);
 	} catch (e) {
@@ -157,6 +160,7 @@ export async function declareAnkan(code: TileCode) {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		recordInput({ t: 'ankan', code });
 		const next = await humanDeclareAnkan(current, code);
 		await settleTurns(next);
 	} catch (e) {
@@ -168,6 +172,7 @@ export async function declareKakan(meldIndex: number) {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		recordInput({ t: 'kakan', meldIndex });
 		const next = await humanDeclareKakan(current, meldIndex);
 		await settleTurns(next);
 	} catch (e) {
@@ -179,6 +184,7 @@ export async function passClaim() {
 	const current = get(gameState);
 	if (!current) return;
 	try {
+		recordInput({ t: 'pass' });
 		const next = await humanPassClaim(current);
 		await settleTurns(next);
 	} catch (e) {
@@ -195,6 +201,9 @@ export async function nextRound() {
 		const log = record ? [...get(gameLog), record] : get(gameLog);
 		if (record) gameLog.set(log);
 		const next = continueGame(current);
+		// Capture the new hand's wall (null if the game just ended) on the input so
+		// replay re-deals the same hand.
+		recordInput({ t: 'nextRound', wall: next.phase === 'game_end' ? null : wallFromState(next) });
 		await settleTurns(next);
 		// The game just ended — persist it (signed-in only; the endpoint no-ops
 		// for anonymous play). Fire-and-forget so the overlay isn't blocked.
