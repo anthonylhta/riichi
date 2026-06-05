@@ -8,10 +8,11 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '$env/dynamic/private';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { getDb } from './db';
 import { handOfTheDay } from './schema';
 import { analyzeHand } from './efficiency';
+import { isRecentHand } from './handDedup';
 import { sydneyDate } from './day';
 import { toEffStr, parseEffStr, isHonor } from '$lib/game/tiles';
 import type { TileCode } from '$lib/game/tiles';
@@ -117,7 +118,18 @@ function countLegal(codes: TileCode[]): boolean {
 	return true;
 }
 
-async function generateHand(date: string): Promise<GeneratedHand | null> {
+// `nonce` is a per-attempt random seed and `avoid` is recent hands (eff-notation)
+// the model must not reuse — together they stop Opus converging on the same
+// "instructive textbook hand" day after day. See
+// notes/bugs/2026-06-05-hotd-duplicate-puzzle.md.
+async function generateHand(
+	date: string,
+	nonce: string,
+	avoid: string[]
+): Promise<GeneratedHand | null> {
+	const avoidClause = avoid.length
+		? ` Do NOT reuse or closely resemble any of these recent puzzle hands: ${avoid.join('  |  ')}.`
+		: '';
 	const res = await anthropic().messages.create({
 		model: MODEL,
 		max_tokens: 2048,
@@ -127,7 +139,7 @@ async function generateHand(date: string): Promise<GeneratedHand | null> {
 		messages: [
 			{
 				role: 'user',
-				content: `Create today's puzzle (date ${date}). Make it distinct from a typical textbook hand.`
+				content: `Create the riichi puzzle for ${date} (variation seed: ${nonce}). Make it distinct from a typical textbook hand.${avoidClause}`
 			}
 		]
 		// output_config + adaptive thinking aren't in this SDK version's types yet.
@@ -191,14 +203,23 @@ Write a clear 2–4 sentence explanation for a learner: why this discard is best
 
 // ── Orchestration ───────────────────────────────────────────────────────────
 
-async function generatePuzzle(date: string): Promise<{ puzzle: Puzzle; model: string }> {
+async function generatePuzzle(
+	date: string,
+	recentHands: TileCode[][] = []
+): Promise<{ puzzle: Puzzle; model: string }> {
 	let gen: GeneratedHand | null = null;
 	let analysis: ReturnType<typeof analyzeHand> | null = null;
+	const avoid = recentHands.map(tilesToStr);
 
-	// A few attempts: skip degenerate hands (too far from tenpai, or no real choice).
-	for (let attempt = 0; attempt < 4; attempt++) {
-		const candidate = await generateHand(date);
+	// A few attempts: skip degenerate hands (too far from tenpai, or no real choice)
+	// and any hand that repeats a recent day. A fresh nonce per attempt nudges the
+	// model off its strong prior so retries actually differ.
+	for (let attempt = 0; attempt < 6; attempt++) {
+		const nonce = Math.random().toString(36).slice(2, 10);
+		const candidate = await generateHand(date, nonce, avoid);
 		if (!candidate) continue;
+		// Never serve a hand we've already used recently (the duplicate-puzzle bug).
+		if (isRecentHand(candidate.hand, recentHands)) continue;
 		const a = analyzeHand(candidate.hand);
 		const sharp = a.bestShanten <= 1 && a.ranked.length >= 2 && a.ukeireTiles.length > 0;
 		if (sharp) {
@@ -206,7 +227,7 @@ async function generatePuzzle(date: string): Promise<{ puzzle: Puzzle; model: st
 			analysis = a;
 			break;
 		}
-		// Keep the best fallback we've seen even if not "sharp".
+		// Keep the best fallback we've seen even if not "sharp" (already non-duplicate).
 		if (!gen && a.bestShanten <= 2) {
 			gen = candidate;
 			analysis = a;
@@ -253,7 +274,16 @@ export async function getOrCreateToday(): Promise<StoredPuzzle> {
 		return { date: row.date, puzzle: row.puzzle as Puzzle, model: row.model };
 	}
 
-	const { puzzle, model } = await generatePuzzle(date);
+	// Pull the recent puzzles so generation can avoid repeating them. Today's row
+	// doesn't exist yet (checked above), so these are all prior days.
+	const recent = await db
+		.select({ puzzle: handOfTheDay.puzzle })
+		.from(handOfTheDay)
+		.orderBy(desc(handOfTheDay.date))
+		.limit(14);
+	const recentHands = recent.map((r) => (r.puzzle as Puzzle).hand);
+
+	const { puzzle, model } = await generatePuzzle(date, recentHands);
 	await db.insert(handOfTheDay).values({ date, puzzle, model }).onConflictDoNothing();
 
 	const row = (await db.select().from(handOfTheDay).where(eq(handOfTheDay.date, date)).limit(1))[0];
