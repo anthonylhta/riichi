@@ -34,6 +34,12 @@
 		<a href="/hand-of-the-day" class="hotd-link">
 			Hand of the Day <span class="hotd-jp">今日の手牌</span>
 		</a>
+
+		<Show when="signed-in">
+			<a href="/profile" class="hotd-link">
+				Profile <span class="hotd-jp">プロフィール</span>
+			</a>
+		</Show>
 	</main>
 
 	<footer class="landing-footer">

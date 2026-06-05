@@ -192,10 +192,30 @@ export async function nextRound() {
 	try {
 		// Capture the round that just finished before advancing.
 		const record = recordRound(current);
-		if (record) gameLog.update((log) => [...log, record]);
+		const log = record ? [...get(gameLog), record] : get(gameLog);
+		if (record) gameLog.set(log);
 		const next = continueGame(current);
 		await settleTurns(next);
+		// The game just ended — persist it (signed-in only; the endpoint no-ops
+		// for anonymous play). Fire-and-forget so the overlay isn't blocked.
+		if (next.phase === 'game_end') void saveFinishedGame(next, log);
 	} catch (e) {
 		console.error('nextRound failed:', e);
+	}
+}
+
+// POST the finished game to be saved against the signed-in account. Best-effort:
+// any failure (anonymous, offline, server error) is swallowed — saving is not on
+// the critical path of finishing a game.
+async function saveFinishedGame(state: GameState, log: RoundRecord[]) {
+	try {
+		const finalScores = state.players.map((p) => p.score) as [number, number, number, number];
+		await fetch('/api/games', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ finalScores, rounds: log })
+		});
+	} catch (e) {
+		console.error('saveFinishedGame failed:', e);
 	}
 }

@@ -35,11 +35,17 @@ export const puzzleResults = pgTable(
 	(t) => [unique('puzzle_results_user_date').on(t.userId, t.date)]
 );
 
+// One row per finished solo game (human is seat 0). `winner` is the seat that
+// finished 1st; `placement` is the human's rank (1–4). `rounds` holds the full
+// per-round log (RoundRecord[]) so the profile can derive hand-level stats
+// (agari / deal-in rate) — turn-level moves stay in `game_moves`, still deferred.
 export const games = pgTable('games', {
 	id: serial('id').primaryKey(),
 	userId: integer('user_id').references(() => users.id),
 	finalScores: jsonb('final_scores').notNull(),
 	winner: integer('winner').notNull(),
+	placement: integer('placement').notNull(),
+	rounds: jsonb('rounds').notNull(),
 	createdAt: timestamp('created_at').defaultNow().notNull()
 });
 
