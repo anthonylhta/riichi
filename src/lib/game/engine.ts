@@ -242,8 +242,12 @@ export async function checkTsumo(
 	afterKan = false
 ): Promise<RoundResult | null> {
 	const player = state.players[seat];
+	// A complete hand has 14 tiles, plus one extra per kan (a kan meld holds 4 tiles
+	// but counts as one set). Without the kan adjustment, any winning hand containing
+	// a kan totals 15+ here and tsumo (incl. rinshan) was silently never offered.
 	const totalTiles = player.hand.length + player.melds.reduce((s, m) => s + m.tiles.length, 0);
-	if (totalTiles !== 14) return null;
+	const kanCount = player.melds.filter((m) => m.tiles.length === 4).length;
+	if (totalTiles !== 14 + kanCount) return null;
 
 	const isLastTile = state.wallPos >= state.liveWall.length;
 	const isFirstTake = player.discards.length === 0 && !state.anyCallMadeThisRound;
