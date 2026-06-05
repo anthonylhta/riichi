@@ -534,6 +534,25 @@ function aiChiHandTiles(
 	return best;
 }
 
+// A call is only legal if the caller still has a tile to discard afterward AND
+// keeps at least one concealed tile (the tanki wait) — a hand may have at most 4
+// melds, and a 4-meld hand must keep its single waiting tile. Calling into 4 melds
+// + 0 concealed tiles is an illegal, undiscardable hand: runAiTurn then reads its
+// 14 melded tiles as "post-call" (skips the draw) and chooseDiscard crashes on the
+// empty hand, which the store swallows into a freeze.
+// See notes/bugs/2026-06-05-ai-call-strands-hand-freeze.md.
+//   `consumed`     — concealed tiles the call moves into the meld
+//   `drawsRinshan` — kans draw a replacement tile (pon/chi do not)
+// After the call the hand has (handLen - consumed + rinshan) tiles; we need ≥ 2 so
+// that one can be discarded and ≥ 1 remains.
+export function callKeepsLegalHand(
+	handLen: number,
+	consumed: number,
+	drawsRinshan: boolean
+): boolean {
+	return handLen - consumed + (drawsRinshan ? 1 : 0) >= 2;
+}
+
 async function applyAiCalls(
 	state: GameState,
 	discardTile: GameTile,
@@ -546,7 +565,7 @@ async function applyAiCalls(
 		if (player.isHuman || player.isRiichi) continue;
 
 		const daiminkanTiles = aiDaiminkanHandTiles(player.hand, discardTile);
-		if (daiminkanTiles) {
+		if (daiminkanTiles && callKeepsLegalHand(player.hand.length, 3, true)) {
 			const meld: Meld = {
 				type: 'daiminkan',
 				tiles: [...daiminkanTiles, discardTile],
@@ -563,7 +582,7 @@ async function applyAiCalls(
 		}
 
 		const ponTiles = aiPonHandTiles(player.hand, discardTile);
-		if (ponTiles) {
+		if (ponTiles && callKeepsLegalHand(player.hand.length, 2, false)) {
 			const meld: Meld = {
 				type: 'pon',
 				tiles: [ponTiles[0], ponTiles[1], discardTile],
@@ -584,7 +603,7 @@ async function applyAiCalls(
 	const chiPlayer = state.players[chiSeat];
 	if (!chiPlayer.isHuman && !chiPlayer.isRiichi) {
 		const chiTiles = aiChiHandTiles(chiPlayer.hand, discardTile, discarderSeat, chiSeat);
-		if (chiTiles) {
+		if (chiTiles && callKeepsLegalHand(chiPlayer.hand.length, 2, false)) {
 			const meld: Meld = {
 				type: 'chi',
 				tiles: sortHand([chiTiles[0], chiTiles[1], discardTile]),
@@ -877,13 +896,25 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	const seat = state.currentSeat as Seat;
 	if (state.players[seat].isHuman) return state;
 
-	// After a pon/chi call the AI already holds the extra tile — skip draw and combat yaku checks
+	// After a pon/chi call the AI already holds the extra tile — skip draw and combat
+	// yaku checks. A genuine post-call hand always has at least one concealed tile to
+	// discard; requiring hand.length > 0 means a degenerate 0-concealed hand (which a
+	// 4-meld bug could otherwise produce) draws normally instead of skipping the draw
+	// into an empty hand and crashing chooseDiscard (the freeze). Belt-and-suspenders
+	// with the callKeepsLegalHand gating that stops such hands forming in the first
+	// place. See notes/bugs/2026-06-05-ai-call-strands-hand-freeze.md.
 	const preDraw = state.players[seat];
 	const totalTiles =
 		preDraw.hand.length + preDraw.melds.reduce((acc, m) => acc + m.tiles.length, 0);
-	const isPostCall = totalTiles >= 14;
+	const isPostCall = totalTiles >= 14 && preDraw.hand.length > 0;
 
 	let s = isPostCall ? state : drawTile(state, seat);
+
+	// The draw may have exhausted the wall — drawTile returns an exhaustive-draw
+	// (round_end) state. Stop here: there's no turn to play and nothing to discard.
+	// (Previously runAiTurn ran on through to chooseDiscard, which crashed on a
+	// fully-melded hand. See notes/bugs/2026-06-05-ai-call-strands-hand-freeze.md.)
+	if (s.phase === 'round_end') return s;
 
 	if (!isPostCall) {
 		const tsumo = await checkTsumo(s, seat);
@@ -893,7 +924,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	// Good AI declares kan when possible (normal turns only)
 	if (!isPostCall && s.players[seat].difficulty === 'good') {
 		const ankanCodes = getAnkanOptions(s.players[seat]);
-		if (ankanCodes.length > 0) {
+		if (ankanCodes.length > 0 && callKeepsLegalHand(s.players[seat].hand.length, 4, true)) {
 			const code = ankanCodes[0];
 			const aiPlayer = s.players[seat];
 			const matching = aiPlayer.hand.filter((t) => t.code === code);
@@ -910,7 +941,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		}
 
 		const kakanOpts = getKakanOptions(s.players[seat]);
-		if (kakanOpts.length > 0) {
+		if (kakanOpts.length > 0 && callKeepsLegalHand(s.players[seat].hand.length, 1, true)) {
 			const { meldIndex, code } = kakanOpts[0];
 			const aiPlayer = s.players[seat];
 			const addedTile = aiPlayer.hand.find((t) => t.code === code);
@@ -931,6 +962,9 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 			}
 		}
 	}
+
+	// A kan's rinshan draw can also exhaust the wall — same bail before discarding.
+	if (s.phase === 'round_end') return s;
 
 	if (!isPostCall && shouldDeclareRiichi(seat, s)) {
 		const players = clonePlayers(s);
