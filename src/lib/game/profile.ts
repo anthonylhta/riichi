@@ -19,6 +19,18 @@ export interface ProfileSummary {
 	recent: PuzzleDay[]; // most-recent first, capped (see RECENT_LIMIT)
 }
 
+// Aggregated solo-game performance for one user, derived from saved games.
+// Rates are integer percents (0–100); avgPlacement is 1–4 to one decimal.
+// All zero when no games have been saved yet (`gamesPlayed === 0`).
+export interface GameStats {
+	gamesPlayed: number;
+	totalRounds: number;
+	firstRate: number; // % of games finished in 1st
+	avgPlacement: number; // mean finishing rank, 1–4
+	agariRate: number; // % of hands (rounds) the player won
+	dealInRate: number; // % of hands the player dealt into
+}
+
 // Identity pulled from Clerk for the account header.
 export interface AccountInfo {
 	name: string | null;

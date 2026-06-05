@@ -101,7 +101,44 @@
 			{/if}
 		</section>
 
-		<p class="soon">Game stats (win rate, deal-ins, placement) are coming once games are saved.</p>
+		<section class="card">
+			<div class="card-head">
+				<span class="card-jp">対局成績</span>
+				<h2>Games</h2>
+			</div>
+
+			{#if data.gameStats && data.gameStats.gamesPlayed > 0}
+				{@const g = data.gameStats}
+				<div class="stat-grid four">
+					<div class="stat">
+						<span class="stat-n">{g.gamesPlayed}</span>
+						<span class="stat-lbl">played</span>
+					</div>
+					<div class="stat">
+						<span class="stat-n">{g.firstRate}<span class="pct">%</span></span>
+						<span class="stat-lbl">1st place</span>
+					</div>
+					<div class="stat">
+						<span class="stat-n">{g.avgPlacement.toFixed(1)}</span>
+						<span class="stat-lbl">avg place</span>
+					</div>
+					<div class="stat">
+						<span class="stat-n">{g.agariRate}<span class="pct">%</span></span>
+						<span class="stat-lbl">win rate</span>
+					</div>
+				</div>
+				<div class="dealin">
+					<span class="dealin-lbl">Deal-in rate</span>
+					<span class="dealin-n">{g.dealInRate}<span class="pct">%</span></span>
+					<span class="dealin-sub">across {g.totalRounds} hands</span>
+				</div>
+			{:else}
+				<p class="empty">
+					No games saved yet — finish a game while signed in to start tracking your win and deal-in
+					rates. <a href="/game">Play a game</a>.
+				</p>
+			{/if}
+		</section>
 	{/if}
 </div>
 
@@ -301,6 +338,9 @@
 		grid-template-columns: repeat(3, 1fr);
 		gap: 0.6rem;
 	}
+	.stat-grid.four {
+		grid-template-columns: repeat(4, 1fr);
+	}
 	.stat {
 		display: flex;
 		flex-direction: column;
@@ -375,10 +415,25 @@
 		color: #c41e3a;
 	}
 
-	.soon {
+	/* Deal-in rate — called out on its own row (the one stat you want low). */
+	.dealin {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		padding-top: 0.2rem;
+	}
+	.dealin-lbl {
+		font-size: 0.88rem;
+		color: #b7ada0;
+	}
+	.dealin-n {
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: #e8e0d5;
+		font-variant-numeric: tabular-nums;
+	}
+	.dealin-sub {
 		font-size: 0.78rem;
-		color: #4a443d;
-		font-style: italic;
-		margin: 0;
+		color: #6a6258;
 	}
 </style>
