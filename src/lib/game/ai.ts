@@ -93,10 +93,17 @@ export function shouldDeclareRiichi(seat: Seat, state: GameState): boolean {
 	const player = state.players[seat];
 	if (player.isRiichi) return false;
 
+	// Riichi legality, mirroring the human-side rules in humanDiscard: the hand
+	// must be closed, the player must afford the 1000-point stick, and at least
+	// 4 live-wall tiles must remain (so every player gets one more draw).
+	if (player.melds.length > 0) return false;
+	if (player.score < 1000) return false;
+	if (state.liveWall.length - state.wallPos < 4) return false;
+
 	const handCodes = player.hand.map((t) => t.code);
 	const shanten = getShanten(handCodes);
 
-	// Declare riichi when tenpai (shanten = 0) and hand is closed
+	// Declare riichi when tenpai (shanten = 0)
 	return shanten === 0;
 }
 
