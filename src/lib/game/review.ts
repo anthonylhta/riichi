@@ -79,11 +79,20 @@ export interface ReviewPayload {
 	moments: ReviewMoment[];
 }
 
-const SEAT = ['You', 'South', 'West', 'North'];
+export const SEAT_NAMES = ['You', 'South', 'West', 'North'] as const;
+const SEAT = SEAT_NAMES;
 
-function summarize(r: RoundRecord): { kind: ReviewMoment['kind']; text: string } {
+// Rounds 1–4 are East, 5–8 South (sudden-death overtime — see ADR 0032).
+export function roundTag(round: number, honba: number): string {
+	const wind = round <= 4 ? 'East' : 'South';
+	const n = round <= 4 ? round : round - 4;
+	return `${wind}-${n}${honba ? ` (${honba} honba)` : ''}`;
+}
+
+// Shared by the post-game review payload and the game-history detail view.
+export function summarize(r: RoundRecord): { kind: ReviewMoment['kind']; text: string } {
 	const me = r.pointChanges[0];
-	const tag = `East-${r.round}${r.honba ? ` (${r.honba} honba)` : ''}`;
+	const tag = roundTag(r.round, r.honba);
 	const delta = `${me >= 0 ? '+' : ''}${me}`;
 
 	if (r.outcome === 'draw') {

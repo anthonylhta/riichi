@@ -1,9 +1,10 @@
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from './db';
 import { games } from './schema';
 import { summarizeGames, type GameRow } from './gamesLogic';
 import type { RoundRecord } from '$lib/game/review';
 import type { GameStats } from '$lib/game/profile';
+import type { GameDetail, GameListItem } from '$lib/game/history';
 
 export interface SavedGameInput {
 	finalScores: [number, number, number, number];
@@ -42,4 +43,70 @@ export async function getGameStats(userId: number): Promise<GameStats> {
 		.from(games)
 		.where(eq(games.userId, userId));
 	return summarizeGames(rows as GameRow[]);
+}
+
+// A user's saved games for the history list, most-recent first. The rounds jsonb
+// stays in the database — only its length comes back.
+export async function listGames(userId: number): Promise<GameListItem[]> {
+	const db = getDb();
+	const rows = await db
+		.select({
+			id: games.id,
+			createdAt: games.createdAt,
+			placement: games.placement,
+			finalScores: games.finalScores,
+			liked: games.liked,
+			roundCount: sql<number>`jsonb_array_length(${games.rounds})`
+		})
+		.from(games)
+		.where(eq(games.userId, userId))
+		.orderBy(desc(games.createdAt));
+
+	return rows.map((r) => ({
+		id: r.id,
+		playedAt: r.createdAt.getTime(),
+		placement: r.placement,
+		finalScores: r.finalScores as [number, number, number, number],
+		roundCount: Number(r.roundCount),
+		liked: r.liked
+	}));
+}
+
+// One saved game in full, ownership-checked: null when the game doesn't exist
+// OR belongs to someone else (the two cases are deliberately indistinguishable).
+export async function getGame(userId: number, gameId: number): Promise<GameDetail | null> {
+	const db = getDb();
+	const rows = await db
+		.select()
+		.from(games)
+		.where(and(eq(games.id, gameId), eq(games.userId, userId)))
+		.limit(1);
+	if (!rows.length) return null;
+
+	const r = rows[0];
+	return {
+		id: r.id,
+		playedAt: r.createdAt.getTime(),
+		placement: r.placement,
+		finalScores: r.finalScores as [number, number, number, number],
+		winner: r.winner,
+		liked: r.liked,
+		rounds: r.rounds as RoundRecord[]
+	};
+}
+
+// Flag/unflag a game as kept. Ownership-checked like getGame; returns false when
+// no owned row matched.
+export async function setGameLiked(
+	userId: number,
+	gameId: number,
+	liked: boolean
+): Promise<boolean> {
+	const db = getDb();
+	const updated = await db
+		.update(games)
+		.set({ liked })
+		.where(and(eq(games.id, gameId), eq(games.userId, userId)))
+		.returning({ id: games.id });
+	return updated.length > 0;
 }
