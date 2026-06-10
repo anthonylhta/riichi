@@ -895,10 +895,13 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 
 	// runAiTurn hands the decision to the human *before* it checks AI claims, so a
 	// human pass must not silently forfeit them. Resolve the AI's claim on this same
-	// discard in priority order — ron first, then pon/chi/daiminkan — before advancing.
-	for (let claimant = 1; claimant < 4; claimant++) {
-		if (claimant === discarderSeat) continue;
-		const ron = await aiCheckRon(cleared, claimant as Seat, discardTile, discarderSeat);
+	// discard in priority order — ron first, then pon/chi/daiminkan — before
+	// advancing. Head-bump: among multiple winning seats, the one closest to the
+	// discarder in turn order takes the ron.
+	for (let offset = 1; offset <= 3; offset++) {
+		const claimant = ((discarderSeat + offset) % 4) as Seat;
+		if (claimant === 0) continue; // the human just passed
+		const ron = await aiCheckRon(cleared, claimant, discardTile, discarderSeat);
 		if (ron) return applyRoundResult(cleared, ron);
 	}
 
@@ -1040,11 +1043,12 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		};
 	}
 
-	// Check AI ron
-	for (let claimant = 0; claimant < 4; claimant++) {
-		if (claimant === seat) continue;
+	// Check AI ron — in turn order from the discarder, so a head-bump between two
+	// waiting seats goes to the closer one
+	for (let offset = 1; offset <= 3; offset++) {
+		const claimant = ((seat + offset) % 4) as Seat;
 		if (state.players[claimant].isHuman) continue;
-		const ron = await aiCheckRon(s, claimant as Seat, discardTile, seat);
+		const ron = await aiCheckRon(s, claimant, discardTile, seat);
 		if (ron) return applyRoundResult(s, ron);
 	}
 

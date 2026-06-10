@@ -22,9 +22,10 @@ import {
 	humanPassClaim,
 	humanDiscard,
 	getHumanClaimOptions,
-	continueGame
+	continueGame,
+	runAiTurn
 } from './engine';
-import { getShanten } from './ai';
+import { chooseDiscard, getShanten } from './ai';
 import { checkWin } from './scoring';
 import type { GameState, PlayerState, RoundResult, Seat } from './types';
 import type { GameTile } from './tiles';
@@ -703,6 +704,53 @@ describe('AI ron — furiten', () => {
 		expect(result.phase).toBe('round_end');
 		expect(result.roundResult?.winner).toBe(2);
 		expect(result.roundResult?.winType).toBe('ron');
+	});
+
+	it('head-bump: the AI ron goes to the seat closest to the discarder in turn order', async () => {
+		// Seat 2 discards; seats 1 and 3 both win on the tile. Turn order from the
+		// discarder is 3 → (0) → 1, so seat 3 must take the ron, not seat 1.
+		vi.mocked(chooseDiscard).mockImplementation((seat: Seat, st: GameState) => {
+			const hand = st.players[seat].hand;
+			return hand[hand.length - 1];
+		});
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 2,
+			players: [
+				makePlayer(0),
+				makePlayer(1, { hand: [tile(34, 71)] }),
+				makePlayer(2, { hand: [tile(5, 60)] }),
+				makePlayer(3, { hand: [tile(34, 72)] })
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult?.winner).toBe(3);
+	});
+
+	it('head-bump on a passed claim: closest AI seat to the discarder takes the ron', async () => {
+		// Human (seat 0) discarded and passed its own claim; seats 1 and 3 both win.
+		// Turn order from seat 0 is 1 → 2 → 3, so seat 1 takes it.
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(5, 50),
+			lastDiscardSeat: 0,
+			pendingRon: null,
+			claimOptions: [],
+			players: [
+				makePlayer(0),
+				makePlayer(1, { hand: [tile(34, 71)] }),
+				makePlayer(2),
+				makePlayer(3, { hand: [tile(34, 72)] })
+			] as GameState['players']
+		});
+
+		const result = await humanPassClaim(state);
+
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult?.winner).toBe(1);
 	});
 
 	it('blocks a furiten AI ron when the human passes a claim', async () => {
