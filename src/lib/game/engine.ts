@@ -667,6 +667,8 @@ export async function humanDiscard(
 		!player.isRiichi &&
 		player.melds.length === 0 &&
 		player.score >= 1000 &&
+		// At least 4 live-wall tiles must remain so every player gets one more draw
+		state.liveWall.length - state.wallPos >= 4 &&
 		getShanten(player.hand.filter((t) => t.id !== tileId).map((t) => t.code)) === 0;
 	const willDeclareRiichi = declareRiichi && canDeclareRiichi;
 
