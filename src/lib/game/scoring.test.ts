@@ -372,3 +372,35 @@ describe('checkWin — non-wins', () => {
 		expect(res.isWin).toBe(false);
 	});
 });
+
+describe('checkWin — chankan', () => {
+	// 111m 56m 456p 678s 99s waiting 4m/7m. Closed ron on 7m has NO yaku (the 111m
+	// triplet kills pinfu, the 1m kills tanyao) — so the win only exists as chankan.
+	const CHANKAN_WAIT = [
+		TC.M1,
+		TC.M1,
+		TC.M1,
+		TC.M5,
+		TC.M6,
+		TC.P4,
+		TC.P5,
+		TC.P6,
+		TC.S6,
+		TC.S7,
+		TC.S8,
+		TC.S9,
+		TC.S9
+	];
+
+	it('a yakuless ron is no win on a normal discard', async () => {
+		const res = await win({ handCodes: CHANKAN_WAIT, ronTileCode: TC.M7 });
+		expect(res.isWin).toBe(false);
+	});
+
+	it('the same ron on a kakan tile wins as chankan', async () => {
+		const res = await win({ handCodes: CHANKAN_WAIT, ronTileCode: TC.M7, afterKan: true });
+		expect(res.isWin).toBe(true);
+		expect(res.yakuNames).toContain('Chankan');
+		expect(res.han).toBe(1);
+	});
+});
