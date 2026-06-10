@@ -20,7 +20,10 @@ function calcShantenAndUkeire(codes: TileCode[]): { shanten: number; ukeire: num
 			shanten: result.shanten ?? 8,
 			ukeire: result.totalUkeire ?? 0
 		};
-	} catch {
+	} catch (e) {
+		// Don't let a throwing efficiency lib masquerade as a terrible hand — the
+		// fallback keeps the game running, but the failure has to be visible.
+		console.error('shanten/ukeire calc failed (treated as shanten 8):', e);
 		return { shanten: 8, ukeire: 0 };
 	}
 }

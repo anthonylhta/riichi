@@ -153,7 +153,11 @@ export async function checkWin(input: WinCheckInput): Promise<WinResult> {
 			yaku,
 			yakuNames: yaku.map((y) => y.name)
 		};
-	} catch {
+	} catch (e) {
+		// A throwing scorer must not silently read as "no win" — that exact pattern
+		// hid the 13-tile ron bug and the kan-tsumo bug (see notes/bugs). The safe
+		// fallback stands, but the failure has to be visible.
+		console.error('checkWin failed (treated as no-win):', e);
 		return { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
 	}
 }
