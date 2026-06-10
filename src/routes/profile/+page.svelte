@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { SignInButton } from 'svelte-clerk';
+	import { placeLabel, type GameListItem } from '$lib/game/history';
 
 	let { data } = $props();
 
@@ -15,6 +16,29 @@
 
 	// Short MM-DD label for the recent-history dots.
 	const md = (date: string) => date.slice(5);
+
+	const playedOn = (ms: number) =>
+		new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
+	// Optimistic ★ state, overlaid on the server-loaded list so a toggle doesn't
+	// need a reload; reverted if the PATCH fails.
+	let likedOverride = $state<Record<number, boolean>>({});
+	const isLiked = (g: GameListItem) => likedOverride[g.id] ?? g.liked;
+
+	async function toggleLike(g: GameListItem) {
+		const next = !isLiked(g);
+		likedOverride[g.id] = next;
+		try {
+			const res = await fetch(`/api/games/${g.id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ liked: next })
+			});
+			if (!res.ok) likedOverride[g.id] = !next;
+		} catch {
+			likedOverride[g.id] = !next;
+		}
+	}
 </script>
 
 <div class="profile">
@@ -139,6 +163,42 @@
 				</p>
 			{/if}
 		</section>
+
+		{#if data.games.length}
+			<section class="card">
+				<div class="card-head">
+					<span class="card-jp">対局履歴</span>
+					<h2>Game history</h2>
+				</div>
+
+				<ul class="game-list">
+					{#each data.games as g (g.id)}
+						<li class="game-row">
+							<button
+								class="star"
+								class:lit={isLiked(g)}
+								onclick={() => toggleLike(g)}
+								title={isLiked(g) ? 'Unflag this game' : 'Keep this game'}
+								aria-label={isLiked(g) ? 'Unflag this game' : 'Keep this game'}
+							>
+								{isLiked(g) ? '★' : '☆'}
+							</button>
+							<a class="game-link" href="/profile/games/{g.id}">
+								<span class="game-date">{playedOn(g.playedAt)}</span>
+								<span class="game-place" class:first={g.placement === 1}>
+									{placeLabel(g.placement)}
+								</span>
+								<span class="game-scores">
+									<strong>{g.finalScores[0]}</strong> · {g.finalScores[1]} · {g.finalScores[2]} · {g
+										.finalScores[3]}
+								</span>
+								<span class="game-rounds">{g.roundCount} hands</span>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 	{/if}
 </div>
 
@@ -413,6 +473,84 @@
 	}
 	.empty a {
 		color: #c41e3a;
+	}
+
+	/* Game history list */
+	.game-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+	.game-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.star {
+		flex-shrink: 0;
+		background: none;
+		border: none;
+		padding: 0.2rem;
+		font-size: 1.05rem;
+		line-height: 1;
+		color: #4a443d;
+		cursor: pointer;
+	}
+	.star:hover {
+		color: #b7ada0;
+	}
+	.star.lit {
+		color: #d4a437;
+	}
+	.game-link {
+		flex: 1;
+		min-width: 0;
+		display: grid;
+		grid-template-columns: 6.2rem 2.8rem 1fr auto;
+		align-items: baseline;
+		gap: 0.7rem;
+		padding: 0.45rem 0.6rem;
+		border: 1px solid #221f1c;
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.015);
+		text-decoration: none;
+		color: inherit;
+	}
+	.game-link:hover {
+		border-color: #3a3530;
+		background: rgba(255, 255, 255, 0.03);
+	}
+	.game-date {
+		font-size: 0.82rem;
+		color: #b7ada0;
+		white-space: nowrap;
+	}
+	.game-place {
+		font-size: 0.82rem;
+		font-weight: 700;
+		color: #8a8278;
+	}
+	.game-place.first {
+		color: #d4a437;
+	}
+	.game-scores {
+		font-size: 0.82rem;
+		color: #8a8278;
+		font-variant-numeric: tabular-nums;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.game-scores strong {
+		color: #e8e0d5;
+	}
+	.game-rounds {
+		font-size: 0.74rem;
+		color: #6a6258;
+		white-space: nowrap;
 	}
 
 	/* Deal-in rate — called out on its own row (the one stat you want low). */

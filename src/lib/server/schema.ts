@@ -39,6 +39,8 @@ export const puzzleResults = pgTable(
 // finished 1st; `placement` is the human's rank (1–4). `rounds` holds the full
 // per-round log (RoundRecord[]) so the profile can derive hand-level stats
 // (agari / deal-in rate) — turn-level moves stay in `game_moves`, still deferred.
+// `liked` marks games the player wants to keep findable in their history (and,
+// later, exempt from any age-out of routine games).
 export const games = pgTable('games', {
 	id: serial('id').primaryKey(),
 	userId: integer('user_id').references(() => users.id),
@@ -46,6 +48,7 @@ export const games = pgTable('games', {
 	winner: integer('winner').notNull(),
 	placement: integer('placement').notNull(),
 	rounds: jsonb('rounds').notNull(),
+	liked: boolean('liked').default(false).notNull(),
 	createdAt: timestamp('created_at').defaultNow().notNull()
 });
 

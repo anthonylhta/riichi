@@ -2,9 +2,10 @@ import type { PageServerLoad } from './$types';
 import { clerkClient } from 'svelte-clerk/server';
 import { getOrCreateUser } from '$lib/server/users';
 import { getProfileSummary } from '$lib/server/profile';
-import { getGameStats } from '$lib/server/games';
+import { getGameStats, listGames } from '$lib/server/games';
 import { sydneyDate } from '$lib/server/day';
 import type { AccountInfo, GameStats, ProfileSummary } from '$lib/game/profile';
+import type { GameListItem } from '$lib/game/history';
 
 // The profile is account-only — anonymous visitors get a sign-in prompt rather
 // than a redirect, so the page itself can stay anonymous-first like the rest of
@@ -17,14 +18,16 @@ export const load: PageServerLoad = async ({ locals }) => {
 			signedIn: false,
 			account: null as AccountInfo | null,
 			summary: null as ProfileSummary | null,
-			gameStats: null as GameStats | null
+			gameStats: null as GameStats | null,
+			games: [] as GameListItem[]
 		};
 	}
 
 	const userId = await getOrCreateUser(clerkId);
-	const [summary, gameStats, clerkUser] = await Promise.all([
+	const [summary, gameStats, gamesList, clerkUser] = await Promise.all([
 		getProfileSummary(userId, sydneyDate()),
 		getGameStats(userId),
+		listGames(userId),
 		clerkClient.users.getUser(clerkId)
 	]);
 
@@ -44,5 +47,5 @@ export const load: PageServerLoad = async ({ locals }) => {
 		memberSince: clerkUser.createdAt
 	};
 
-	return { signedIn: true, account, summary, gameStats };
+	return { signedIn: true, account, summary, gameStats, games: gamesList };
 };
