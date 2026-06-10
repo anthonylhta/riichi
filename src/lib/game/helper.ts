@@ -52,7 +52,7 @@ export function buildHelperView(state: GameState): HelperView {
 		round: state.round,
 		honba: state.honba,
 		roundWind: 28 as TileCode,
-		wallCount: state.liveWall.length - state.wallPos,
+		wallCount: state.wallEnd - state.wallPos,
 		doraIndicators: state.doraIndicators.map((t) => t.code),
 		hand: me.hand.map((t) => t.code),
 		melds: meldView(me.melds),

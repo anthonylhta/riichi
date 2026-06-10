@@ -114,7 +114,7 @@ export function shouldDeclareRiichi(seat: Seat, state: GameState): boolean {
 	// 4 live-wall tiles must remain (so every player gets one more draw).
 	if (player.melds.length > 0) return false;
 	if (player.score < 1000) return false;
-	if (state.liveWall.length - state.wallPos < 4) return false;
+	if (state.wallEnd - state.wallPos < 4) return false;
 
 	const handCodes = player.hand.map((t) => t.code);
 	const shanten = getShanten(handCodes);

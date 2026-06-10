@@ -64,6 +64,11 @@ export interface GameState {
 
 	liveWall: GameTile[];
 	wallPos: number;
+	// One past the last drawable live-wall index. Starts at liveWall.length and
+	// drops by one per kan: the dead wall stays 14 tiles by claiming the live
+	// wall's tail, so each rinshan draw costs the round its final draw (this is
+	// what keeps haitei timing correct).
+	wallEnd: number;
 	deadWall: GameTile[];
 	rinshankPos: number; // 0–3, index into deadWall for next rinshan draw
 	doraIndicators: GameTile[];

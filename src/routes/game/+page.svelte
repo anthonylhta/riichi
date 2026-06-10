@@ -240,7 +240,7 @@
 				{#if $gameState.honba > 0}
 					<span class="honba">{$gameState.honba} 本場</span>
 				{/if}
-				<span class="wall-count">Wall {$gameState.liveWall.length - $gameState.wallPos}</span>
+				<span class="wall-count">Wall {$gameState.wallEnd - $gameState.wallPos}</span>
 				{#if isDev}
 					<button class="dev-toggle" onclick={() => (devPanelOpen = !devPanelOpen)}>
 						{devPanelOpen ? '✕ Dev' : '⚙ Dev'}
@@ -264,7 +264,7 @@
 							<div class="center-honba">{$gameState.honba} 本場</div>
 						{/if}
 						<div class="center-wall">
-							<span class="wall-num">{$gameState.liveWall.length - $gameState.wallPos}</span>
+							<span class="wall-num">{$gameState.wallEnd - $gameState.wallPos}</span>
 							<span class="wall-unit">tiles left</span>
 						</div>
 						<div class="center-dora">

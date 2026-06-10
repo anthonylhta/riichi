@@ -97,6 +97,7 @@ function initRound(
 		turnCount: 0,
 		liveWall,
 		wallPos: pos,
+		wallEnd: liveWall.length,
 		deadWall,
 		rinshankPos: 0,
 		doraIndicators,
@@ -213,7 +214,7 @@ function applyExhaustiveDraw(state: GameState): GameState {
 }
 
 function drawTile(state: GameState, seat: Seat): GameState {
-	if (state.wallPos >= state.liveWall.length) {
+	if (state.wallPos >= state.wallEnd) {
 		return applyExhaustiveDraw(state);
 	}
 
@@ -260,7 +261,7 @@ export async function checkTsumo(
 	const kanCount = player.melds.filter((m) => m.tiles.length === 4).length;
 	if (totalTiles !== 14 + kanCount) return null;
 
-	const isLastTile = state.wallPos >= state.liveWall.length;
+	const isLastTile = state.wallPos >= state.wallEnd;
 	const isFirstTake = player.discards.length === 0 && !state.anyCallMadeThisRound;
 
 	const result = await checkWin({
@@ -324,7 +325,7 @@ export async function checkRon(
 	chankan = false
 ): Promise<RoundResult | null> {
 	const player = state.players[claimantSeat];
-	const isLastTile = state.wallPos >= state.liveWall.length;
+	const isLastTile = state.wallPos >= state.wallEnd;
 
 	const result = await checkWin({
 		handCodes: player.hand.map((t) => t.code),
@@ -488,6 +489,9 @@ function drawRinshan(state: GameState, seat: Seat): GameState {
 		...state,
 		players,
 		rinshankPos: state.rinshankPos + 1,
+		// The dead wall replenishes from the live wall's tail, so the kan costs the
+		// round its final draw — keeping total draws (and haitei timing) correct
+		wallEnd: state.wallEnd - 1,
 		doraIndicators: newDoraIndicators,
 		uraDoraIndicators: newUraDoraIndicators,
 		turnCount: state.turnCount + 1,
@@ -684,7 +688,7 @@ export async function humanDiscard(
 		player.melds.length === 0 &&
 		player.score >= 1000 &&
 		// At least 4 live-wall tiles must remain so every player gets one more draw
-		state.liveWall.length - state.wallPos >= 4 &&
+		state.wallEnd - state.wallPos >= 4 &&
 		getShanten(player.hand.filter((t) => t.id !== tileId).map((t) => t.code)) === 0;
 	const willDeclareRiichi = declareRiichi && canDeclareRiichi;
 
