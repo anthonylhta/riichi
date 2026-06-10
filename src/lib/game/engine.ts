@@ -992,7 +992,11 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	// A kan's rinshan draw can also exhaust the wall — same bail before discarding.
 	if (s.phase === 'round_end') return s;
 
-	if (!isPostCall && shouldDeclareRiichi(seat, s)) {
+	// Decide riichi before choosing the discard: the declaring turn picks among
+	// tenpai-keeping discards, while a hand already in riichi must tsumogiri —
+	// chooseDiscard needs to know which case this is.
+	const declaringRiichi = !isPostCall && shouldDeclareRiichi(seat, s);
+	if (declaringRiichi) {
 		const players = clonePlayers(s);
 		players[seat].isRiichi = true;
 		players[seat].isIppatsu = true;
@@ -1001,7 +1005,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		s = { ...s, players, riichiBets: s.riichiBets + 1 };
 	}
 
-	const discardTile = chooseDiscard(seat, s);
+	const discardTile = chooseDiscard(seat, s, declaringRiichi);
 	const players = clonePlayers(s);
 	players[seat].hand = sortHand(s.players[seat].hand.filter((t) => t.id !== discardTile.id));
 	players[seat].discards = [...s.players[seat].discards, discardTile];
