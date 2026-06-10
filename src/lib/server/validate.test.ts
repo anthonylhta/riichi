@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { validateHelperView, validateReviewPayload, validateRounds } from './validate';
+import {
+	validateHelperView,
+	validateReplayLog,
+	validateReviewPayload,
+	validateRounds
+} from './validate';
 
 // A payload exactly like the client's buildHelperView produces.
 function goodHelperView() {
@@ -157,5 +162,68 @@ describe('validateRounds', () => {
 		const r = goodRound();
 		r.outcome = 'hack';
 		expect(validateRounds([r])).toBeNull();
+	});
+});
+
+function goodReplay() {
+	const startWall = Array.from({ length: 136 }, (_, i) => ({
+		code: (i % 34) + 1,
+		id: i,
+		isRed: false
+	}));
+	return {
+		version: 1,
+		startWall,
+		inputs: [
+			{ t: 'discard', tileId: 52, riichi: false },
+			{ t: 'pass' },
+			{ t: 'pon', tileIds: [3, 40] },
+			{ t: 'daiminkan', tileIds: [3, 40, 77] },
+			{ t: 'ankan', code: 9 },
+			{ t: 'kakan', meldIndex: 0 },
+			{ t: 'tsumo' },
+			{ t: 'nextRound', wall: startWall },
+			{ t: 'ron' },
+			{ t: 'nextRound', wall: null }
+		]
+	};
+}
+
+describe('validateReplayLog', () => {
+	it('accepts a well-formed log', () => {
+		const v = validateReplayLog(goodReplay());
+		expect(v).not.toBeNull();
+		expect(v?.startWall).toHaveLength(136);
+		expect(v?.inputs).toHaveLength(10);
+	});
+
+	it('rejects a wall that is not exactly 136 tiles', () => {
+		const r = goodReplay();
+		r.startWall = r.startWall.slice(0, 100);
+		expect(validateReplayLog(r)).toBeNull();
+	});
+
+	it('rejects an unknown input type', () => {
+		const r = goodReplay() as Record<string, unknown>;
+		r.inputs = [{ t: 'evil', payload: 'x'.repeat(100_000) }];
+		expect(validateReplayLog(r)).toBeNull();
+	});
+
+	it('rejects an unbounded inputs array', () => {
+		const r = goodReplay();
+		r.inputs = Array.from({ length: 10_000 }, () => ({ t: 'pass' as const }));
+		expect(validateReplayLog(r)).toBeNull();
+	});
+
+	it('rejects an unknown version', () => {
+		const r = goodReplay() as Record<string, unknown>;
+		r.version = 2;
+		expect(validateReplayLog(r)).toBeNull();
+	});
+
+	it('rejects out-of-range tile ids', () => {
+		const r = goodReplay();
+		r.inputs = [{ t: 'discard', tileId: 999, riichi: false }];
+		expect(validateReplayLog(r)).toBeNull();
 	});
 });

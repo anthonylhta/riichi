@@ -51,6 +51,15 @@
 			<span class="place" class:first={g.placement === 1}>{placeLabel(g.placement)}</span>
 		</p>
 
+		{#if g.hasReplay}
+			<p class="export">
+				<a class="export-link" href="/api/games/{g.id}/replay" download>
+					⤓ Download replay (JSON)
+				</a>
+				<span class="export-sub">full move log — every wall and input of this game</span>
+			</p>
+		{/if}
+
 		<section class="standings">
 			{#each standings as s, rank (s.seat)}
 				<div class="standing" class:you={s.seat === 0}>
@@ -184,6 +193,26 @@
 	}
 	.place.first {
 		color: #d4a437;
+	}
+
+	.export {
+		margin: -0.4rem 0 0;
+		text-align: center;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+	.export-link {
+		color: #8a8278;
+		text-decoration: none;
+		font-size: 0.85rem;
+	}
+	.export-link:hover {
+		color: #e8e0d5;
+	}
+	.export-sub {
+		font-size: 0.72rem;
+		color: #5a5248;
 	}
 
 	/* Final standings */

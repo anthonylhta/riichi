@@ -97,4 +97,16 @@ describe('replay determinism', () => {
 		const { log } = await playAndCapture(150);
 		expect(await outcomeFromLog(log)).toEqual(await outcomeFromLog(log));
 	});
+
+	// Persistence round-trip: a log captured exactly the way the store does must
+	// pass the server-side validator after a JSON round-trip (what POST /api/games
+	// receives) — otherwise real games would silently save without their replay.
+	it('a captured log survives the server validator', async () => {
+		const { validateReplayLog } = await import('../server/validate');
+		const { log } = await playAndCapture(100);
+		const validated = validateReplayLog(JSON.parse(JSON.stringify(log)));
+		expect(validated).not.toBeNull();
+		expect(validated?.inputs).toEqual(log.inputs);
+		expect(validated?.startWall).toEqual(log.startWall);
+	});
 });

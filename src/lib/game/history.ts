@@ -15,7 +15,9 @@ export interface GameListItem {
 	liked: boolean;
 }
 
-// One saved game in full, for the round-by-round detail view.
+// One saved game in full, for the round-by-round detail view. `hasReplay` says
+// whether a move log was saved (games before replay persistence have none) —
+// the log itself is only fetched by the export download.
 export interface GameDetail {
 	id: number;
 	playedAt: number;
@@ -24,6 +26,7 @@ export interface GameDetail {
 	winner: number; // seat that finished 1st
 	liked: boolean;
 	rounds: RoundRecord[];
+	hasReplay: boolean;
 }
 
 const PLACE = ['1st', '2nd', '3rd', '4th'] as const;
