@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getOrCreateUser } from '$lib/server/users';
 import { saveGame, type SavedGameInput } from '$lib/server/games';
-import type { RoundRecord } from '$lib/game/review';
+import { validateRounds } from '$lib/server/validate';
 
 // Persist a finished solo game. Signed-in users get the game saved (feeding the
 // profile's game stats); anonymous users are a no-op — nothing is gated, matching
@@ -23,7 +23,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	) {
 		return json({ error: 'Invalid finalScores' }, { status: 400 });
 	}
-	if (!Array.isArray(body.rounds)) {
+	// Full shape + bounds validation: rounds goes into a jsonb column, so this
+	// caps the row size and guarantees the stored shape for future history views.
+	const rounds = validateRounds(body.rounds);
+	if (!rounds) {
 		return json({ error: 'Invalid rounds' }, { status: 400 });
 	}
 
@@ -35,7 +38,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const input: SavedGameInput = {
 		finalScores: finalScores as [number, number, number, number],
-		rounds: body.rounds as RoundRecord[]
+		rounds
 	};
 
 	try {
