@@ -813,3 +813,42 @@ describe('humanDeclareKakan — chankan scoring flag', () => {
 		}
 	});
 });
+
+// ─── leftover riichi sticks at game end ──────────────────────────────────────
+
+describe('continueGame — leftover riichi sticks go to 1st place', () => {
+	// Carried sticks only exist when the final hand was a draw (a win claims them
+	// in applyRoundResult), so these states end with roundResult: null.
+	const drawEnd = (round: number, scores: [number, number, number, number], riichiBets: number) =>
+		makeState({
+			phase: 'round_end',
+			round,
+			dealer: 3,
+			roundResult: null,
+			exhaustiveDrawResult: { tenpaiSeats: [], pointChanges: [0, 0, 0, 0] },
+			riichiBets,
+			players: scores.map((s, i) => makePlayer(i, { score: s })) as GameState['players']
+		});
+
+	it('awards carried sticks to the leader when the game ends at the target', () => {
+		// East-4 draw, noten dealer passes → game ends (leader ≥ 30k); 2 sticks carried.
+		const next = continueGame(drawEnd(4, [31000, 25000, 23000, 19000], 2));
+		expect(next.phase).toBe('game_end');
+		expect(next.players[0].score).toBe(33000);
+		expect(next.riichiBets).toBe(0);
+	});
+
+	it('awards carried sticks to the leader on a bust end', () => {
+		const next = continueGame(drawEnd(1, [30000, -1000, 24000, 22000], 1));
+		expect(next.phase).toBe('game_end');
+		expect(next.players[0].score).toBe(31000);
+		expect(next.riichiBets).toBe(0);
+	});
+
+	it('breaks a score tie toward the earlier seat', () => {
+		const next = continueGame(drawEnd(4, [30000, 30000, 20000, 15000], 1));
+		expect(next.phase).toBe('game_end');
+		expect(next.players[0].score).toBe(31000);
+		expect(next.players[1].score).toBe(30000);
+	});
+});
