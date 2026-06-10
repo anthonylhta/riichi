@@ -672,7 +672,9 @@ describe('AI ron — furiten', () => {
 	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
 
 	beforeEach(() => {
-		vi.mocked(getShanten).mockReturnValue(8);
+		// Tenpai (0): a hand that can ron is tenpai by definition, and the furiten
+		// scan's shanten early-exit must not short-circuit these scenarios.
+		vi.mocked(getShanten).mockReturnValue(0);
 		vi.mocked(checkWin).mockImplementation(async (input: { handCodes: number[] }) =>
 			input.handCodes.includes(34) ? WIN : NO_WIN
 		);
