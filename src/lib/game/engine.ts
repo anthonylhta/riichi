@@ -349,6 +349,23 @@ export async function checkRon(
 	};
 }
 
+// Ron check for an AI seat, with furiten enforced. AI seats don't maintain the
+// isFuriten/isTempFuriten flags (those are only computed for the human, seat 0),
+// so discard furiten is computed on demand — and only after a ron actually lands,
+// keeping the expensive scan off the common no-win path. Temp furiten can't arise
+// for AI seats: they never decline an available ron.
+async function aiCheckRon(
+	state: GameState,
+	claimantSeat: Seat,
+	discardTile: GameTile,
+	discarderSeat: Seat
+): Promise<RoundResult | null> {
+	const ron = await checkRon(state, claimantSeat, discardTile, discarderSeat);
+	if (!ron) return null;
+	if (await computeOwnDiscardFuriten(state, claimantSeat)) return null;
+	return ron;
+}
+
 export function applyRoundResult(state: GameState, result: RoundResult): GameState {
 	const players = clonePlayers(state);
 	for (let i = 0; i < 4; i++) {
@@ -693,7 +710,7 @@ export async function humanDiscard(
 	const newState = { ...postDiscard, players: furitenPlayers };
 
 	for (let s = 1; s < 4; s++) {
-		const ron = await checkRon(newState, s as Seat, tile, 0);
+		const ron = await aiCheckRon(newState, s as Seat, tile, 0);
 		if (ron) return applyRoundResult(newState, ron);
 	}
 
@@ -798,7 +815,7 @@ export async function humanDeclareKakan(state: GameState, meldIndex: number): Pr
 
 	// Chankan: AI opponents can ron the added tile
 	for (let s = 1; s < 4; s++) {
-		const ron = await checkRon(state, s as Seat, addedTile, 0);
+		const ron = await aiCheckRon(state, s as Seat, addedTile, 0);
 		if (ron) return applyRoundResult(state, ron);
 	}
 
@@ -879,7 +896,7 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 	// discard in priority order — ron first, then pon/chi/daiminkan — before advancing.
 	for (let claimant = 1; claimant < 4; claimant++) {
 		if (claimant === discarderSeat) continue;
-		const ron = await checkRon(cleared, claimant as Seat, discardTile, discarderSeat);
+		const ron = await aiCheckRon(cleared, claimant as Seat, discardTile, discarderSeat);
 		if (ron) return applyRoundResult(cleared, ron);
 	}
 
@@ -950,8 +967,11 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 			const aiPlayer = s.players[seat];
 			const addedTile = aiPlayer.hand.find((t) => t.code === code);
 			if (addedTile) {
-				// Chankan: check if human can ron the added tile
-				const humanRon = await checkRon(s, 0, addedTile, seat);
+				// Chankan: check if human can ron the added tile (furiten blocks it,
+				// same as a ron on a normal discard)
+				const human = s.players[0];
+				const humanRon =
+					human.isFuriten || human.isTempFuriten ? null : await checkRon(s, 0, addedTile, seat);
 				if (humanRon) return applyRoundResult(s, humanRon);
 
 				const players = clonePlayers(s);
@@ -1018,7 +1038,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	for (let claimant = 0; claimant < 4; claimant++) {
 		if (claimant === seat) continue;
 		if (state.players[claimant].isHuman) continue;
-		const ron = await checkRon(s, claimant as Seat, discardTile, seat);
+		const ron = await aiCheckRon(s, claimant as Seat, discardTile, seat);
 		if (ron) return applyRoundResult(s, ron);
 	}
 

@@ -25,6 +25,7 @@ import {
 	continueGame
 } from './engine';
 import { getShanten } from './ai';
+import { checkWin } from './scoring';
 import type { GameState, PlayerState, RoundResult, Seat } from './types';
 import type { GameTile } from './tiles';
 
@@ -655,5 +656,73 @@ describe('continueGame — 30k target + sudden-death overtime', () => {
 		// South-4 (round 8), dealer (seat 0) wins → would renchan forever otherwise.
 		const next = continueGame(endState(8, [29000, 26000, 25000, 20000], win(0, 1), 0));
 		expect(next.phase).toBe('game_end');
+	});
+});
+
+// ─── AI furiten ──────────────────────────────────────────────────────────────
+
+describe('AI ron — furiten', () => {
+	// checkWin wins only for the hand carrying the marker tile (code 34). That makes
+	// seat 2 the sole winning seat, and also makes its furiten scan "win" on any of
+	// its own discards (the scan reuses checkWin against the same marked hand).
+	const WIN = { isWin: true, han: 2, fu: 30, score: 2000, yaku: [], yakuNames: [] };
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockImplementation(async (input: { handCodes: number[] }) =>
+			input.handCodes.includes(34) ? WIN : NO_WIN
+		);
+	});
+
+	const discardState = (seat2Discards: GameTile[]) => {
+		const humanHand = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((c, i) => tile(c, i + 1));
+		return makeState({
+			phase: 'player_discard',
+			players: [
+				makePlayer(0, { hand: humanHand }),
+				makePlayer(1),
+				makePlayer(2, { hand: [tile(34, 70)], discards: seat2Discards }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+	};
+
+	it('blocks an AI ron when the winning tile class is in its own discards (furiten)', async () => {
+		const state = discardState([tile(5, 80)]); // seat 2 already discarded a winner
+		const result = await humanDiscard(state, 13); // human discards; seat 2 "wins" on it
+
+		expect(result.roundResult).toBeNull();
+		expect(result.phase).not.toBe('round_end');
+	});
+
+	it('lets the AI ron when it has no furiten discards', async () => {
+		const state = discardState([]); // clean pond → no furiten
+		const result = await humanDiscard(state, 13);
+
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult?.winner).toBe(2);
+		expect(result.roundResult?.winType).toBe('ron');
+	});
+
+	it('blocks a furiten AI ron when the human passes a claim', async () => {
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(5, 50),
+			lastDiscardSeat: 0,
+			pendingRon: null,
+			claimOptions: [],
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: [tile(34, 70)], discards: [tile(5, 80)] }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanPassClaim(state);
+
+		expect(result.roundResult).toBeNull();
+		expect(result.phase).not.toBe('round_end');
 	});
 });
