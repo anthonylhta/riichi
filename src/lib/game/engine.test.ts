@@ -23,7 +23,8 @@ import {
 	humanDiscard,
 	getHumanClaimOptions,
 	continueGame,
-	runAiTurn
+	runAiTurn,
+	humanDeclareKakan
 } from './engine';
 import { chooseDiscard, getShanten } from './ai';
 import { checkWin } from './scoring';
@@ -772,5 +773,43 @@ describe('AI ron — furiten', () => {
 
 		expect(result.roundResult).toBeNull();
 		expect(result.phase).not.toBe('round_end');
+	});
+});
+
+// ─── chankan flag ────────────────────────────────────────────────────────────
+
+describe('humanDeclareKakan — chankan scoring flag', () => {
+	it('checks AI rons on the added tile with the chankan (after_kan) flag set', async () => {
+		const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+		vi.mocked(checkWin).mockClear(); // drop ron calls recorded by earlier tests
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+		vi.mocked(getShanten).mockReturnValue(8);
+
+		const ponMeld = {
+			type: 'pon' as const,
+			tiles: [tile(5, 30), tile(5, 31), tile(5, 32)],
+			calledFrom: 1 as Seat
+		};
+		const state = makeState({
+			players: [
+				makePlayer(0, { hand: [tile(5, 40), tile(9, 41)], melds: [ponMeld] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		await humanDeclareKakan(state, 0);
+
+		// The chankan checks are the ron-shaped calls on the added tile (code 5);
+		// every one of them must carry afterKan so chankan scores correctly.
+		const chankanChecks = vi
+			.mocked(checkWin)
+			.mock.calls.map(([input]) => input)
+			.filter((input) => !input.isTsumo && input.ronTileCode === 5);
+		expect(chankanChecks.length).toBeGreaterThan(0);
+		for (const input of chankanChecks) {
+			expect(input.afterKan).toBe(true);
+		}
 	});
 });

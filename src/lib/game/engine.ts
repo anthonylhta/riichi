@@ -307,7 +307,10 @@ export async function checkRon(
 	state: GameState,
 	claimantSeat: Seat,
 	discardTile: GameTile,
-	discarderSeat: Seat
+	discarderSeat: Seat,
+	// True when the "discard" is a tile being added to a kan (kakan) — riichi-rs
+	// scores after_kan on a ron as chankan (vs rinshan on a tsumo).
+	chankan = false
 ): Promise<RoundResult | null> {
 	const player = state.players[claimantSeat];
 	const isLastTile = state.wallPos >= state.liveWall.length;
@@ -321,6 +324,7 @@ export async function checkRon(
 		isDoubleRiichi: player.isDoubleRiichi,
 		isIppatsu: player.isIppatsu,
 		isTsumo: false,
+		afterKan: chankan,
 		lastTile: isLastTile,
 		akaCount: countAka(player.hand) + countAka(meldTiles(player)) + countAka([discardTile]),
 		ronTileCode: discardTile.code,
@@ -358,9 +362,10 @@ async function aiCheckRon(
 	state: GameState,
 	claimantSeat: Seat,
 	discardTile: GameTile,
-	discarderSeat: Seat
+	discarderSeat: Seat,
+	chankan = false
 ): Promise<RoundResult | null> {
-	const ron = await checkRon(state, claimantSeat, discardTile, discarderSeat);
+	const ron = await checkRon(state, claimantSeat, discardTile, discarderSeat, chankan);
 	if (!ron) return null;
 	if (await computeOwnDiscardFuriten(state, claimantSeat)) return null;
 	return ron;
@@ -817,7 +822,7 @@ export async function humanDeclareKakan(state: GameState, meldIndex: number): Pr
 
 	// Chankan: AI opponents can ron the added tile
 	for (let s = 1; s < 4; s++) {
-		const ron = await aiCheckRon(state, s as Seat, addedTile, 0);
+		const ron = await aiCheckRon(state, s as Seat, addedTile, 0, true);
 		if (ron) return applyRoundResult(state, ron);
 	}
 
@@ -976,7 +981,9 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 				// same as a ron on a normal discard)
 				const human = s.players[0];
 				const humanRon =
-					human.isFuriten || human.isTempFuriten ? null : await checkRon(s, 0, addedTile, seat);
+					human.isFuriten || human.isTempFuriten
+						? null
+						: await checkRon(s, 0, addedTile, seat, true);
 				if (humanRon) return applyRoundResult(s, humanRon);
 
 				const players = clonePlayers(s);
