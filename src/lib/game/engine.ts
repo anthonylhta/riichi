@@ -1115,6 +1115,10 @@ function clonePlayers(state: GameState): [PlayerState, PlayerState, PlayerState,
 async function computeOwnDiscardFuriten(state: GameState, seat: Seat): Promise<boolean> {
 	const player = state.players[seat];
 	if (player.discards.length === 0) return false;
+	// A hand with no waits can't be furiten. One cheap shanten check spares the
+	// per-discard checkWin scan below (up to ~20 WASM calls) for the vast
+	// majority of discards, where the hand isn't tenpai yet.
+	if (getShanten(player.hand.map((t) => t.code)) !== 0) return false;
 	const uniqueCodes = [...new Set(player.discards.map((t) => t.code))];
 	for (const code of uniqueCodes) {
 		const result = await checkWin({
