@@ -120,6 +120,17 @@ export function initGame(wall?: GameTile[]): GameState {
 	return initRound([25000, 25000, 25000, 25000], 0, 1, 0, 0, wall);
 }
 
+// End the game, settling any riichi sticks still on the table. Sticks left over
+// from exhaustive draws (a win claims them in applyRoundResult) go to 1st place,
+// per MJ Soul; a score tie breaks toward the earlier seat.
+function endGame(state: GameState): GameState {
+	if (state.riichiBets === 0) return { ...state, phase: 'game_end' };
+	const top = state.players.reduce((best, p) => (p.score > best.score ? p : best));
+	const players = clonePlayers(state);
+	players[top.seat].score += state.riichiBets * 1000;
+	return { ...state, players, riichiBets: 0, phase: 'game_end' };
+}
+
 export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	if (state.phase !== 'round_end') return state;
 
@@ -149,7 +160,7 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	// MJ Soul tobi: busting is a strictly-negative score; exactly 0 stays alive.
 	const bust = state.players.some((p) => p.score < 0);
 	if (bust) {
-		return { ...state, phase: 'game_end' };
+		return endGame(state);
 	}
 
 	// Points target + sudden-death overtime. Once we're past the nominal last hand
@@ -159,10 +170,10 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	// after which the leader simply wins regardless of the target.
 	const topScore = Math.max(...state.players.map((p) => p.score));
 	if (nextRound > LAST_REGULAR_ROUND && topScore >= TARGET_SCORE) {
-		return { ...state, phase: 'game_end' };
+		return endGame(state);
 	}
 	if (state.round >= ABSOLUTE_LAST_ROUND) {
-		return { ...state, phase: 'game_end' };
+		return endGame(state);
 	}
 
 	const scores = state.players.map((p) => p.score) as [number, number, number, number];
