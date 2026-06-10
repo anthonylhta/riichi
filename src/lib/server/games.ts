@@ -3,12 +3,16 @@ import { getDb } from './db';
 import { games } from './schema';
 import { summarizeGames, type GameRow } from './gamesLogic';
 import type { RoundRecord } from '$lib/game/review';
+import type { ReplayLog } from '$lib/game/replay';
 import type { GameStats } from '$lib/game/profile';
 import type { GameDetail, GameListItem } from '$lib/game/history';
 
 export interface SavedGameInput {
 	finalScores: [number, number, number, number];
 	rounds: RoundRecord[];
+	// Deterministic move log (null when the client didn't capture one — e.g. a
+	// game finished on a build predating replay persistence).
+	replay: ReplayLog | null;
 }
 
 // Persist one finished game for a signed-in user. `winner` (top-scoring seat) and
@@ -29,7 +33,8 @@ export async function saveGame(userId: number, input: SavedGameInput): Promise<n
 			finalScores: input.finalScores,
 			winner,
 			placement,
-			rounds: input.rounds
+			rounds: input.rounds,
+			replay: input.replay
 		})
 		.returning({ id: games.id });
 	return inserted[0].id;
@@ -74,10 +79,21 @@ export async function listGames(userId: number): Promise<GameListItem[]> {
 
 // One saved game in full, ownership-checked: null when the game doesn't exist
 // OR belongs to someone else (the two cases are deliberately indistinguishable).
+// The replay jsonb stays in the database — only its presence comes back (the
+// blob itself is served by getGameReplay for the export download).
 export async function getGame(userId: number, gameId: number): Promise<GameDetail | null> {
 	const db = getDb();
 	const rows = await db
-		.select()
+		.select({
+			id: games.id,
+			createdAt: games.createdAt,
+			placement: games.placement,
+			finalScores: games.finalScores,
+			winner: games.winner,
+			liked: games.liked,
+			rounds: games.rounds,
+			hasReplay: sql<boolean>`${games.replay} is not null`
+		})
 		.from(games)
 		.where(and(eq(games.id, gameId), eq(games.userId, userId)))
 		.limit(1);
@@ -91,8 +107,22 @@ export async function getGame(userId: number, gameId: number): Promise<GameDetai
 		finalScores: r.finalScores as [number, number, number, number],
 		winner: r.winner,
 		liked: r.liked,
-		rounds: r.rounds as RoundRecord[]
+		rounds: r.rounds as RoundRecord[],
+		hasReplay: r.hasReplay
 	};
+}
+
+// A saved game's move log, ownership-checked like getGame. Null when the game
+// doesn't exist, isn't yours, or predates replay persistence.
+export async function getGameReplay(userId: number, gameId: number): Promise<ReplayLog | null> {
+	const db = getDb();
+	const rows = await db
+		.select({ replay: games.replay })
+		.from(games)
+		.where(and(eq(games.id, gameId), eq(games.userId, userId)))
+		.limit(1);
+	if (!rows.length) return null;
+	return (rows[0].replay as ReplayLog | null) ?? null;
 }
 
 // Flag/unflag a game as kept. Ownership-checked like getGame; returns false when

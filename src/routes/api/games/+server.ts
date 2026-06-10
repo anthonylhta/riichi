@@ -2,13 +2,13 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getOrCreateUser } from '$lib/server/users';
 import { saveGame, type SavedGameInput } from '$lib/server/games';
-import { validateRounds } from '$lib/server/validate';
+import { validateReplayLog, validateRounds } from '$lib/server/validate';
 
 // Persist a finished solo game. Signed-in users get the game saved (feeding the
 // profile's game stats); anonymous users are a no-op — nothing is gated, matching
 // the anonymous-first model, so this just returns `saved: false`.
 export const POST: RequestHandler = async ({ request, locals }) => {
-	let body: { finalScores?: unknown; rounds?: unknown };
+	let body: { finalScores?: unknown; rounds?: unknown; replay?: unknown };
 	try {
 		body = await request.json();
 	} catch {
@@ -30,6 +30,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return json({ error: 'Invalid rounds' }, { status: 400 });
 	}
 
+	// The move log is optional and best-effort: stats are the critical path, so a
+	// malformed replay is dropped (and logged) rather than failing the whole save.
+	let replay = body.replay == null ? null : validateReplayLog(body.replay);
+	if (body.replay != null && !replay) {
+		console.error('Save game: dropping invalid replay log');
+		replay = null;
+	}
+
 	const clerkId = locals.auth().userId;
 	if (!clerkId) {
 		// Anonymous games aren't saved (no account to attribute them to).
@@ -38,7 +46,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const input: SavedGameInput = {
 		finalScores: finalScores as [number, number, number, number],
-		rounds
+		rounds,
+		replay
 	};
 
 	try {

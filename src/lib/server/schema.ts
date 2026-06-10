@@ -40,7 +40,10 @@ export const puzzleResults = pgTable(
 // per-round log (RoundRecord[]) so the profile can derive hand-level stats
 // (agari / deal-in rate) — turn-level moves stay in `game_moves`, still deferred.
 // `liked` marks games the player wants to keep findable in their history (and,
-// later, exempt from any age-out of routine games).
+// later, exempt from any age-out of routine games). `replay` is the deterministic
+// move log (ReplayLog from ADR 0040: each round's wall + the ordered human
+// inputs) — the engine re-derives every AI move from it, so this is the complete
+// turn-level record. Nullable: games saved before this column have none.
 export const games = pgTable('games', {
 	id: serial('id').primaryKey(),
 	userId: integer('user_id').references(() => users.id),
@@ -49,19 +52,7 @@ export const games = pgTable('games', {
 	placement: integer('placement').notNull(),
 	rounds: jsonb('rounds').notNull(),
 	liked: boolean('liked').default(false).notNull(),
-	createdAt: timestamp('created_at').defaultNow().notNull()
-});
-
-export const gameMoves = pgTable('game_moves', {
-	id: serial('id').primaryKey(),
-	gameId: integer('game_id')
-		.references(() => games.id)
-		.notNull(),
-	turnNumber: integer('turn_number').notNull(),
-	seat: integer('seat').notNull(),
-	action: text('action').notNull(),
-	tileCode: integer('tile_code'),
-	handSnapshot: jsonb('hand_snapshot'),
+	replay: jsonb('replay'),
 	createdAt: timestamp('created_at').defaultNow().notNull()
 });
 

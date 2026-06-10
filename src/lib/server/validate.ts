@@ -10,6 +10,8 @@
 
 import type { HelperMeld, HelperSeatView, HelperView } from '$lib/game/helper';
 import type { ReviewMoment, ReviewPayload, RoundRecord } from '$lib/game/review';
+import type { ReplayInput, ReplayLog } from '$lib/game/replay';
+import type { GameTile } from '$lib/game/tiles';
 
 // Generous upper bounds for a legal game state.
 const MAX_DISCARDS = 30; // a single pond can't realistically exceed ~24
@@ -247,4 +249,90 @@ export function validateRounds(v: unknown): RoundRecord[] | null {
 		out.push(record);
 	}
 	return out;
+}
+
+// ── Replay log (games.replay jsonb) ─────────────────────────────────────────
+
+const WALL_SIZE = 136;
+// Human inputs only (AI moves are derived on replay): generously ~25 per round
+// across MAX_ROUNDS hands still sits far below this.
+const MAX_REPLAY_INPUTS = 4096;
+
+function gameTile(v: unknown): GameTile | null {
+	if (typeof v !== 'object' || v === null) return null;
+	const t = v as Record<string, unknown>;
+	if (!isTile(t.code) || !isInt(t.id, 0, 135) || typeof t.isRed !== 'boolean') return null;
+	return { code: t.code, id: t.id, isRed: t.isRed };
+}
+
+// A full deal-order wall: exactly 136 physical tiles.
+function wall(v: unknown): GameTile[] | null {
+	if (!Array.isArray(v) || v.length !== WALL_SIZE) return null;
+	const out: GameTile[] = [];
+	for (const t of v) {
+		const tile = gameTile(t);
+		if (!tile) return null;
+		out.push(tile);
+	}
+	return out;
+}
+
+function tileIds(v: unknown, count: number): number[] | null {
+	if (!Array.isArray(v) || v.length !== count || !v.every((id) => isInt(id, 0, 135))) return null;
+	return v;
+}
+
+function replayInput(v: unknown): ReplayInput | null {
+	if (typeof v !== 'object' || v === null) return null;
+	const i = v as Record<string, unknown>;
+	switch (i.t) {
+		case 'discard':
+			if (!isInt(i.tileId, 0, 135) || typeof i.riichi !== 'boolean') return null;
+			return { t: 'discard', tileId: i.tileId, riichi: i.riichi };
+		case 'tsumo':
+		case 'ron':
+		case 'pass':
+			return { t: i.t };
+		case 'pon':
+		case 'chi': {
+			const ids = tileIds(i.tileIds, 2);
+			return ids ? { t: i.t, tileIds: ids } : null;
+		}
+		case 'daiminkan': {
+			const ids = tileIds(i.tileIds, 3);
+			return ids ? { t: 'daiminkan', tileIds: ids } : null;
+		}
+		case 'ankan':
+			return isTile(i.code) ? { t: 'ankan', code: i.code } : null;
+		case 'kakan':
+			return isInt(i.meldIndex, 0, 3) ? { t: 'kakan', meldIndex: i.meldIndex } : null;
+		case 'nextRound': {
+			if (i.wall === null) return { t: 'nextRound', wall: null };
+			const w = wall(i.wall);
+			return w ? { t: 'nextRound', wall: w } : null;
+		}
+		default:
+			return null;
+	}
+}
+
+// Validates the deterministic move log saved to games.replay (jsonb) — bounds
+// the row size and guarantees the stored shape is replayable via replayGame().
+export function validateReplayLog(v: unknown): ReplayLog | null {
+	if (typeof v !== 'object' || v === null) return null;
+	const b = v as Record<string, unknown>;
+	if (b.version !== 1) return null;
+
+	const startWall = wall(b.startWall);
+	if (!startWall) return null;
+	if (!Array.isArray(b.inputs) || b.inputs.length > MAX_REPLAY_INPUTS) return null;
+
+	const inputs: ReplayInput[] = [];
+	for (const i of b.inputs) {
+		const input = replayInput(i);
+		if (!input) return null;
+		inputs.push(input);
+	}
+
+	return { version: 1, startWall, inputs };
 }

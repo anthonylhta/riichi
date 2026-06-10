@@ -225,14 +225,15 @@ export async function nextRound() {
 
 // POST the finished game to be saved against the signed-in account. Best-effort:
 // any failure (anonymous, offline, server error) is swallowed — saving is not on
-// the critical path of finishing a game.
+// the critical path of finishing a game. The replay log is complete here: the
+// final nextRound input is recorded before settleTurns yields game_end.
 async function saveFinishedGame(state: GameState, log: RoundRecord[]) {
 	try {
 		const finalScores = state.players.map((p) => p.score) as [number, number, number, number];
 		await fetch('/api/games', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ finalScores, rounds: log })
+			body: JSON.stringify({ finalScores, rounds: log, replay: replayLog })
 		});
 	} catch (e) {
 		console.error('saveFinishedGame failed:', e);
