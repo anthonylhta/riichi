@@ -192,9 +192,17 @@ export async function passClaim() {
 	}
 }
 
+// Re-entry guard for nextRound: the settle loop below is async, so a fast
+// double-click on "Next round" could read the same round_end state twice and
+// record the finished round twice (duplicating it in the review payload and
+// the saved game).
+let advancingRound = false;
+
 export async function nextRound() {
 	const current = get(gameState);
 	if (!current) return;
+	if (current.phase !== 'round_end' || advancingRound) return;
+	advancingRound = true;
 	try {
 		// Capture the round that just finished before advancing.
 		const record = recordRound(current);
@@ -210,6 +218,8 @@ export async function nextRound() {
 		if (next.phase === 'game_end') void saveFinishedGame(next, log);
 	} catch (e) {
 		console.error('nextRound failed:', e);
+	} finally {
+		advancingRound = false;
 	}
 }
 
