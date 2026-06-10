@@ -56,20 +56,36 @@ function getSafeTiles(state: GameState, riichiSeat: Seat): Set<number> {
 	return safe;
 }
 
-export function chooseDiscard(seat: Seat, state: GameState): GameTile {
+export function chooseDiscard(seat: Seat, state: GameState, declaringRiichi = false): GameTile {
 	const player = state.players[seat];
 	const hand = player.hand;
 	const difficulty = player.difficulty;
 
-	const ranked = rankDiscards(hand);
+	// A hand already locked by riichi must tsumogiri. The drawn tile is the last
+	// one in the hand: hands are only re-sorted when a discard is applied, and a
+	// riichi player can't call, so every draw (wall or rinshan) lands at the end.
+	if (player.isRiichi && !declaringRiichi) {
+		return hand[hand.length - 1];
+	}
+
+	let ranked = rankDiscards(hand);
+
+	// The riichi-declaring discard must keep the hand tenpai — without this, the
+	// good AI's safe-tile fallback below could declare riichi and then discard a
+	// safe tile that breaks its own tenpai (an illegal riichi).
+	if (declaringRiichi) {
+		const tenpaiKeepers = ranked.filter((o) => o.shanten === 0);
+		if (tenpaiKeepers.length > 0) ranked = tenpaiKeepers;
+	}
 
 	if (difficulty === 'basic') {
 		return ranked[0].tile;
 	}
 
-	// Good AI: avoid tiles that are dangerous against riichi players
+	// Good AI: avoid tiles that are dangerous against riichi players (not counting
+	// our own riichi — defending against ourselves makes no sense)
 	const riichSeats = state.players
-		.map((p, i) => (p.isRiichi ? (i as Seat) : null))
+		.map((p, i) => (p.isRiichi && i !== seat ? (i as Seat) : null))
 		.filter((s): s is Seat => s !== null);
 
 	if (riichSeats.length === 0) {

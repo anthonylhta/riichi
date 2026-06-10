@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 // Unlike engine.test.ts, ai.ts is exercised against the REAL shanten library
 // (mahjong-tile-efficiency runs fine under vitest — see ADR 0016 for the same
 // approach with riichi-rs), so these tests verify actual tenpai detection.
-import { shouldDeclareRiichi } from './ai';
+import { chooseDiscard, shouldDeclareRiichi } from './ai';
 import type { GameState, PlayerState, Seat, Meld } from './types';
 import type { GameTile } from './tiles';
 
@@ -101,5 +101,49 @@ describe('shouldDeclareRiichi — legality', () => {
 	it('does not declare when already in riichi', () => {
 		const state = makeState(makePlayer(1, { hand: TENPAI_HAND, isRiichi: true }));
 		expect(shouldDeclareRiichi(1, state)).toBe(false);
+	});
+});
+
+describe('chooseDiscard — riichi locks the hand', () => {
+	// 123m 456m 789m 11p 56s (13 locked tiles) + a just-drawn East appended last.
+	const lockedHand = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 23, 24].map((c, i) => tile(c, i + 1));
+	const drawnEast = tile(28, 99);
+
+	it('a riichi AI tsumogiris the drawn tile even when a "safe" tile exists', () => {
+		// Seat 2 is also in riichi and has discarded 5s, so the good AI's defensive
+		// fallback would otherwise discard its own 5s — breaking its locked tenpai.
+		const me = makePlayer(1, {
+			hand: [...lockedHand, drawnEast],
+			isRiichi: true,
+			difficulty: 'good'
+		});
+		const state = makeState(me);
+		state.players[2] = makePlayer(2, { isRiichi: true, discards: [tile(23, 80)] });
+
+		const pick = chooseDiscard(1, state);
+		expect(pick.id).toBe(drawnEast.id);
+	});
+
+	it('the riichi-declaring discard must keep tenpai, even over a safe tile', () => {
+		// TENPAI_HAND's only tenpai-keeping discard is 2p. Seat 2's pond makes 6s
+		// "safe"; without the declaringRiichi restriction the good AI would pick 6s
+		// and declare an illegal riichi on a 1-shanten hand.
+		const me = makePlayer(1, { hand: TENPAI_HAND, difficulty: 'good' });
+		const state = makeState(me);
+		state.players[2] = makePlayer(2, { isRiichi: true, discards: [tile(24, 80)] });
+
+		const pick = chooseDiscard(1, state, true);
+		expect(pick.code).toBe(11); // 2p
+	});
+
+	it('without riichi, the good AI still prefers the safe tile', () => {
+		// Same board as above but no riichi declaration in play — the defensive
+		// fallback should keep working as before.
+		const me = makePlayer(1, { hand: TENPAI_HAND, difficulty: 'good' });
+		const state = makeState(me);
+		state.players[2] = makePlayer(2, { isRiichi: true, discards: [tile(24, 80)] });
+
+		const pick = chooseDiscard(1, state);
+		expect(pick.code).toBe(24); // 6s, the safe tile
 	});
 });
