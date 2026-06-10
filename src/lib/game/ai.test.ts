@@ -45,6 +45,7 @@ function makeState(player1: PlayerState, overrides: Partial<GameState> = {}): Ga
 		turnCount: 1,
 		liveWall: wall,
 		wallPos: 0,
+		wallEnd: wall.length,
 		deadWall: [],
 		rinshankPos: 0,
 		riichiBets: 0,

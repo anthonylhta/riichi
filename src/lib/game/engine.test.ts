@@ -68,6 +68,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		turnCount: 1,
 		liveWall: wall,
 		wallPos: 0,
+		wallEnd: wall.length,
 		deadWall,
 		rinshankPos: 0,
 		riichiBets: 0,
@@ -850,5 +851,48 @@ describe('continueGame — leftover riichi sticks go to 1st place', () => {
 		expect(next.phase).toBe('game_end');
 		expect(next.players[0].score).toBe(31000);
 		expect(next.players[1].score).toBe(30000);
+	});
+});
+
+// ─── kan shortens the live wall ──────────────────────────────────────────────
+
+describe('kan — live wall shortening (haitei timing)', () => {
+	it('an ankan moves the wall end back by one', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		const quad = [tile(7, 1), tile(7, 2), tile(7, 3), tile(7, 4)];
+		const state = makeState({
+			players: [
+				makePlayer(0, { hand: [...quad, tile(9, 5)] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const { humanDeclareAnkan } = await import('./engine');
+		const result = await humanDeclareAnkan(state, 7);
+
+		expect(result.wallEnd).toBe(state.wallEnd - 1);
+	});
+
+	it('the draw exhausts at wallEnd, not at the physical end of the live wall', async () => {
+		// One kan has happened: wallEnd sits one short of liveWall.length and the
+		// wall position has reached it — the next draw must trigger the draw, even
+		// though a physical tile still sits at liveWall[69].
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(5, 50),
+			lastDiscardSeat: 3, // next to draw is the human (seat 0)
+			pendingRon: null,
+			claimOptions: [],
+			wallPos: 69,
+			wallEnd: 69
+		});
+
+		const result = await humanPassClaim(state);
+
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult).toBeNull();
+		expect(result.exhaustiveDrawResult).not.toBeNull();
 	});
 });

@@ -41,6 +41,7 @@ function stateWith(p: PlayerState): GameState {
 		turnCount: 1,
 		liveWall,
 		wallPos: 5, // not the last tile
+		wallEnd: liveWall.length,
 		deadWall: Array.from({ length: 14 }, (_, i) => t((i % 34) + 1, 500 + i)),
 		rinshankPos: 0,
 		riichiBets: 0,
