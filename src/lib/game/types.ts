@@ -1,4 +1,5 @@
 import type { GameTile } from './tiles';
+import type { GameEvent } from './events';
 
 export type Seat = 0 | 1 | 2 | 3;
 export type AiDifficulty = 'basic' | 'good';
@@ -88,4 +89,8 @@ export interface GameState {
 
 	roundResult: RoundResult | null;
 	exhaustiveDrawResult: ExhaustiveDrawResult | null;
+
+	// Append-only record of every observable action this game (all seats, all
+	// rounds — carried across initRound). See events.ts; consumed by mjai.ts.
+	events: GameEvent[];
 }
