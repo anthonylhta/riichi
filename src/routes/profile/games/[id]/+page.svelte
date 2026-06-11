@@ -5,6 +5,40 @@
 
 	let { data } = $props();
 
+	// MJAI export: fetch the stored ReplayLog, re-run it through the engine in
+	// the browser (the engine + WASM are dynamic-imported so this page stays
+	// light), and download the derived event log. The replay IS the game —
+	// every AI move is re-derived, so the export covers all four seats.
+	let mjaiBusy = $state(false);
+	let mjaiError = $state('');
+	async function downloadMjai(gameId: number) {
+		if (mjaiBusy) return;
+		mjaiBusy = true;
+		mjaiError = '';
+		try {
+			const [res, { replayGame }, { toMjaiJsonl }] = await Promise.all([
+				fetch(`/api/games/${gameId}/replay`),
+				import('$lib/game/replay'),
+				import('$lib/game/mjai')
+			]);
+			if (!res.ok) throw new Error(`replay fetch failed (${res.status})`);
+			const log = await res.json();
+			const { final } = await replayGame(log);
+			const blob = new Blob([toMjaiJsonl(final.events)], { type: 'application/jsonl' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `riichi-game-${gameId}.mjai.jsonl`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			console.error('MJAI export failed', e);
+			mjaiError = 'Export failed — the replay could not be re-run.';
+		} finally {
+			mjaiBusy = false;
+		}
+	}
+
 	const playedOn = $derived(
 		data.game
 			? new Date(data.game.playedAt).toLocaleDateString(undefined, {
@@ -57,6 +91,15 @@
 					⤓ Download replay (JSON)
 				</a>
 				<span class="export-sub">full move log — every wall and input of this game</span>
+			</p>
+			<p class="export">
+				<button class="export-link" onclick={() => downloadMjai(g.id)} disabled={mjaiBusy}>
+					{mjaiBusy ? 'Rebuilding game…' : '⤓ Download game log (MJAI)'}
+				</button>
+				<span class="export-sub">
+					{#if mjaiError}{mjaiError}{:else}standard format — readable anywhere, works with reviewers
+						like Mortal{/if}
+				</span>
 			</p>
 		{/if}
 
@@ -209,6 +252,20 @@
 	}
 	.export-link:hover {
 		color: #e8e0d5;
+	}
+	/* The MJAI export is a button (it rebuilds the game client-side), styled
+	   to sit flush with the replay download link above it. */
+	button.export-link {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	button.export-link:disabled {
+		color: #5a5248;
+		cursor: wait;
 	}
 	.export-sub {
 		font-size: 0.72rem;
