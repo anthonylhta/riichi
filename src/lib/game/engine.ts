@@ -11,6 +11,17 @@ import type {
 } from './types';
 import { chooseDiscard, getShanten, shouldDeclareRiichi } from './ai';
 import { checkWin } from './scoring';
+import type { GameEvent, Scores } from './events';
+
+// Append one event to the game record (see events.ts). Every observable action
+// goes through here so exports can read the game without re-deriving it.
+function pushEvent(state: GameState, ev: GameEvent): GameState {
+	return { ...state, events: [...state.events, ev] };
+}
+
+function currentScores(players: GameState['players']): Scores {
+	return players.map((p) => p.score) as Scores;
+}
 
 const WINDS: TileCode[] = [TC.EAST, TC.SOUTH, TC.WEST, TC.NORTH];
 
@@ -56,7 +67,10 @@ function initRound(
 	// A pre-shuffled wall (136 tiles, deal order) can be injected to deterministically
 	// re-deal a round — this is what makes a game replayable (see replay.ts). When
 	// omitted we shuffle a fresh wall as usual.
-	wall?: GameTile[]
+	wall?: GameTile[],
+	// The game-so-far event record; initRound builds a fresh state, so prior
+	// rounds' events must be carried in explicitly (continueGame passes them).
+	priorEvents: GameEvent[] = []
 ): GameState {
 	const shuffled = wall ?? shuffleTiles(createWall());
 
@@ -111,7 +125,20 @@ function initRound(
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
-		exhaustiveDrawResult: null
+		exhaustiveDrawResult: null,
+		events: [
+			...priorEvents,
+			{
+				type: 'round_start',
+				round,
+				honba,
+				riichiBets,
+				dealer,
+				doraIndicator: doraIndicators[0],
+				hands: players.map((p) => [...p.hand]) as [GameTile[], GameTile[], GameTile[], GameTile[]],
+				scores: currentScores(players)
+			}
+		]
 	};
 
 	return drawTile(state, dealer);
@@ -125,11 +152,14 @@ export function initGame(wall?: GameTile[]): GameState {
 // from exhaustive draws (a win claims them in applyRoundResult) go to 1st place,
 // per MJ Soul; a score tie breaks toward the earlier seat.
 function endGame(state: GameState): GameState {
-	if (state.riichiBets === 0) return { ...state, phase: 'game_end' };
-	const top = state.players.reduce((best, p) => (p.score > best.score ? p : best));
-	const players = clonePlayers(state);
-	players[top.seat].score += state.riichiBets * 1000;
-	return { ...state, players, riichiBets: 0, phase: 'game_end' };
+	let players = state.players;
+	if (state.riichiBets > 0) {
+		const top = state.players.reduce((best, p) => (p.score > best.score ? p : best));
+		players = clonePlayers(state);
+		players[top.seat].score += state.riichiBets * 1000;
+	}
+	const ended: GameState = { ...state, players, riichiBets: 0, phase: 'game_end' };
+	return pushEvent(ended, { type: 'game_end', scores: currentScores(players) });
 }
 
 export function continueGame(state: GameState, wall?: GameTile[]): GameState {
@@ -180,7 +210,7 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	const scores = state.players.map((p) => p.score) as [number, number, number, number];
 	// Carry riichi sticks over on exhaustive draw; they clear when someone wins
 	const carryBets = result === null ? state.riichiBets : 0;
-	return initRound(scores, nextDealer, nextRound, nextHonba, carryBets, wall);
+	return initRound(scores, nextDealer, nextRound, nextHonba, carryBets, wall, state.events);
 }
 
 function applyExhaustiveDraw(state: GameState): GameState {
@@ -210,7 +240,14 @@ function applyExhaustiveDraw(state: GameState): GameState {
 	}
 
 	const exhaustiveDrawResult: ExhaustiveDrawResult = { tenpaiSeats, pointChanges };
-	return { ...state, players, phase: 'round_end', roundResult: null, exhaustiveDrawResult };
+	const ended: GameState = {
+		...state,
+		players,
+		phase: 'round_end',
+		roundResult: null,
+		exhaustiveDrawResult
+	};
+	return pushEvent(ended, { type: 'ryuukyoku', tenpaiSeats, deltas: pointChanges });
 }
 
 function drawTile(state: GameState, seat: Seat): GameState {
@@ -222,7 +259,7 @@ function drawTile(state: GameState, seat: Seat): GameState {
 	const players = clonePlayers(state);
 	players[seat].hand = [...players[seat].hand, tile];
 
-	return {
+	const drawn: GameState = {
 		...state,
 		players,
 		wallPos: state.wallPos + 1,
@@ -233,6 +270,7 @@ function drawTile(state: GameState, seat: Seat): GameState {
 		pendingRon: null,
 		claimOptions: null
 	};
+	return pushEvent(drawn, { type: 'draw', seat, tile, rinshan: false });
 }
 
 function openMeldsFor(player: PlayerState): [boolean, TileCode[]][] {
@@ -383,13 +421,48 @@ async function aiCheckRon(
 	return ron;
 }
 
-export function applyRoundResult(state: GameState, result: RoundResult): GameState {
+export function applyRoundResult(
+	state: GameState,
+	result: RoundResult,
+	// The winning tile when the state can't tell us: a chankan ron is checked
+	// BEFORE the kakan meld is applied, so state.lastDiscard is stale there.
+	winTile?: GameTile
+): GameState {
 	const players = clonePlayers(state);
 	for (let i = 0; i < 4; i++) {
 		players[i].score += result.pointChanges[i];
 	}
 	players[result.winner].score += state.riichiBets * 1000;
-	return { ...state, players, roundResult: result, phase: 'round_end', riichiBets: 0 };
+
+	// Tsumo: the drawn tile is the last in the (unsorted) hand — drawTile and
+	// drawRinshan both append. Ron: the tile is the live last discard.
+	const winnerHand = state.players[result.winner].hand;
+	const tile =
+		winTile ??
+		(result.winType === 'tsumo' ? (winnerHand[winnerHand.length - 1] ?? null) : state.lastDiscard);
+	const deltas = result.pointChanges.map((d, i) =>
+		i === result.winner ? d + state.riichiBets * 1000 : d
+	) as Scores;
+
+	const ended: GameState = {
+		...state,
+		players,
+		roundResult: result,
+		phase: 'round_end',
+		riichiBets: 0
+	};
+	return pushEvent(ended, {
+		type: 'win',
+		seat: result.winner,
+		from: result.loser,
+		tile,
+		han: result.han,
+		fu: result.fu,
+		score: result.score,
+		yaku: result.yaku,
+		deltas,
+		uraIndicators: state.players[result.winner].isRiichi ? [...state.uraDoraIndicators] : []
+	});
 }
 
 function getPonOption(hand: GameTile[], calledTile: GameTile): ClaimOption | null {
@@ -485,7 +558,7 @@ function drawRinshan(state: GameState, seat: Seat): GameState {
 			? [...state.uraDoraIndicators, state.deadWall[newUraDoraIdx]]
 			: state.uraDoraIndicators;
 
-	return {
+	let drawn: GameState = {
 		...state,
 		players,
 		rinshankPos: state.rinshankPos + 1,
@@ -501,6 +574,14 @@ function drawRinshan(state: GameState, seat: Seat): GameState {
 		pendingRon: null,
 		claimOptions: null
 	};
+	drawn = pushEvent(drawn, { type: 'draw', seat, tile, rinshan: true });
+	if (newDoraIndicators !== state.doraIndicators) {
+		drawn = pushEvent(drawn, {
+			type: 'dora',
+			indicator: newDoraIndicators[newDoraIndicators.length - 1]
+		});
+	}
+	return drawn;
 }
 
 export function getHumanClaimOptions(
@@ -617,7 +698,17 @@ async function applyAiCalls(
 			players[seat].hand = sortHand(player.hand.filter((t) => !ids.has(t.id)));
 			players[seat].melds = [...player.melds, meld];
 			for (const p of players) p.isIppatsu = false;
-			const postKan = { ...state, players, anyCallMadeThisRound: true };
+			const postKan = pushEvent(
+				{ ...state, players, anyCallMadeThisRound: true },
+				{
+					type: 'call',
+					call: 'daiminkan',
+					seat,
+					from: discarderSeat,
+					tile: discardTile,
+					consumed: [...daiminkanTiles]
+				}
+			);
 			const drawn = drawRinshan(postKan, seat);
 			return { ...drawn, phase: 'ai_turn', currentSeat: seat };
 		}
@@ -635,7 +726,17 @@ async function applyAiCalls(
 			);
 			players[seat].melds = [...player.melds, meld];
 			for (const p of players) p.isIppatsu = false;
-			return { ...state, players, anyCallMadeThisRound: true, phase: 'ai_turn', currentSeat: seat };
+			return pushEvent(
+				{ ...state, players, anyCallMadeThisRound: true, phase: 'ai_turn', currentSeat: seat },
+				{
+					type: 'call',
+					call: 'pon',
+					seat,
+					from: discarderSeat,
+					tile: discardTile,
+					consumed: [ponTiles[0], ponTiles[1]]
+				}
+			);
 		}
 	}
 
@@ -656,13 +757,23 @@ async function applyAiCalls(
 			);
 			players[chiSeat].melds = [...chiPlayer.melds, meld];
 			for (const p of players) p.isIppatsu = false;
-			return {
-				...state,
-				players,
-				anyCallMadeThisRound: true,
-				phase: 'ai_turn',
-				currentSeat: chiSeat
-			};
+			return pushEvent(
+				{
+					...state,
+					players,
+					anyCallMadeThisRound: true,
+					phase: 'ai_turn',
+					currentSeat: chiSeat
+				},
+				{
+					type: 'call',
+					call: 'chi',
+					seat: chiSeat,
+					from: discarderSeat,
+					tile: discardTile,
+					consumed: [chiTiles[0], chiTiles[1]]
+				}
+			);
 		}
 	}
 
@@ -719,7 +830,8 @@ export async function humanDiscard(
 		currentSeat: 1,
 		pendingTsumo: null,
 		pendingRon: null,
-		claimOptions: null
+		claimOptions: null,
+		events: [...state.events, { type: 'discard', seat: 0, tile, riichi: willDeclareRiichi }]
 	};
 
 	// Recompute furiten flags after the discard
@@ -778,7 +890,15 @@ export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameStat
 	);
 	players[0].melds = [...player.melds, meld];
 
-	return { ...applyCall(state, players), phase: 'player_discard', currentSeat: 0 };
+	const called = pushEvent(applyCall(state, players), {
+		type: 'call',
+		call: 'pon',
+		seat: 0,
+		from: state.lastDiscardSeat!,
+		tile: calledTile,
+		consumed: [handTiles[0], handTiles[1]]
+	});
+	return { ...called, phase: 'player_discard', currentSeat: 0 };
 }
 
 export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameState {
@@ -799,7 +919,15 @@ export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameStat
 	);
 	players[0].melds = [...player.melds, meld];
 
-	return { ...applyCall(state, players), phase: 'player_discard', currentSeat: 0 };
+	const called = pushEvent(applyCall(state, players), {
+		type: 'call',
+		call: 'chi',
+		seat: 0,
+		from: state.lastDiscardSeat!,
+		tile: calledTile,
+		consumed: [handTiles[0], handTiles[1]]
+	});
+	return { ...called, phase: 'player_discard', currentSeat: 0 };
 }
 
 export async function humanDeclareAnkan(state: GameState, code: TileCode): Promise<GameState> {
@@ -817,7 +945,10 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 	];
 	// Ankan doesn't cancel ippatsu but does mark a call made
 	for (const p of players) if (p.seat !== 0) p.isIppatsu = false;
-	const postKan = { ...state, players, anyCallMadeThisRound: true };
+	const postKan = pushEvent(
+		{ ...state, players, anyCallMadeThisRound: true },
+		{ type: 'ankan', seat: 0, consumed: matching.slice(0, 4) }
+	);
 
 	const drawn = drawRinshan(postKan, 0);
 	const tsumo = await checkTsumo(drawn, 0, true);
@@ -835,19 +966,28 @@ export async function humanDeclareKakan(state: GameState, meldIndex: number): Pr
 	const addedTile = player.hand.find((t) => t.code === code);
 	if (!addedTile) return state;
 
+	// The kakan is declared (and recorded) before the chankan check — a robbed
+	// kan still happened, and the record shows the kakan followed by the ron.
+	const declared = pushEvent(state, {
+		type: 'kakan',
+		seat: 0,
+		tile: addedTile,
+		consumed: [...meld.tiles]
+	});
+
 	// Chankan: AI opponents can ron the added tile
 	for (let s = 1; s < 4; s++) {
-		const ron = await aiCheckRon(state, s as Seat, addedTile, 0, true);
-		if (ron) return applyRoundResult(state, ron);
+		const ron = await aiCheckRon(declared, s as Seat, addedTile, 0, true);
+		if (ron) return applyRoundResult(declared, ron, addedTile);
 	}
 
-	const players = clonePlayers(state);
+	const players = clonePlayers(declared);
 	players[0].hand = sortHand(player.hand.filter((t) => t.id !== addedTile.id));
 	players[0].melds = player.melds.map((m, i) =>
 		i === meldIndex ? { ...m, type: 'kakan' as const, tiles: [...m.tiles, addedTile] } : m
 	);
 	for (const p of players) p.isIppatsu = false;
-	const postKan = { ...state, players, anyCallMadeThisRound: true };
+	const postKan = { ...declared, players, anyCallMadeThisRound: true };
 
 	const drawn = drawRinshan(postKan, 0);
 	const tsumo = await checkTsumo(drawn, 0, true);
@@ -874,7 +1014,14 @@ export async function humanClaimDaiminkan(
 	players[0].hand = sortHand(player.hand.filter((t) => !handTileIds.has(t.id)));
 	players[0].melds = [...player.melds, meld];
 
-	const postKan = applyCall(state, players);
+	const postKan = pushEvent(applyCall(state, players), {
+		type: 'call',
+		call: 'daiminkan',
+		seat: 0,
+		from: state.lastDiscardSeat!,
+		tile: calledTile,
+		consumed: [...handTiles]
+	});
 	const drawn = drawRinshan(postKan, 0);
 	const tsumo = await checkTsumo(drawn, 0, true);
 	return { ...drawn, pendingTsumo: tsumo };
@@ -981,7 +1128,11 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 				{ type: 'ankan' as const, tiles: matching.slice(0, 4), calledFrom: null }
 			];
 			for (const p of players) if (p.seat !== seat) p.isIppatsu = false;
-			s = drawRinshan({ ...s, players, anyCallMadeThisRound: true }, seat);
+			const postKan = pushEvent(
+				{ ...s, players, anyCallMadeThisRound: true },
+				{ type: 'ankan', seat, consumed: matching.slice(0, 4) }
+			);
+			s = drawRinshan(postKan, seat);
 			const kanTsumo = await checkTsumo(s, seat, true);
 			if (kanTsumo) return applyRoundResult(s, kanTsumo);
 		}
@@ -992,6 +1143,15 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 			const aiPlayer = s.players[seat];
 			const addedTile = aiPlayer.hand.find((t) => t.code === code);
 			if (addedTile) {
+				// Declared (and recorded) before the chankan check — a robbed kan
+				// still appears in the record, followed by the ron.
+				s = pushEvent(s, {
+					type: 'kakan',
+					seat,
+					tile: addedTile,
+					consumed: [...aiPlayer.melds[meldIndex].tiles]
+				});
+
 				// Chankan: check if human can ron the added tile (furiten blocks it,
 				// same as a ron on a normal discard)
 				const human = s.players[0];
@@ -999,7 +1159,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 					human.isFuriten || human.isTempFuriten
 						? null
 						: await checkRon(s, 0, addedTile, seat, true);
-				if (humanRon) return applyRoundResult(s, humanRon);
+				if (humanRon) return applyRoundResult(s, humanRon, addedTile);
 
 				const players = clonePlayers(s);
 				players[seat].hand = sortHand(aiPlayer.hand.filter((t) => t.id !== addedTile.id));
@@ -1046,7 +1206,8 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		lastDiscard: discardTile,
 		currentSeat: nextSeat,
 		lastDiscardSeat: seat,
-		phase: 'ai_turn'
+		phase: 'ai_turn',
+		events: [...s.events, { type: 'discard', seat, tile: discardTile, riichi: declaringRiichi }]
 	};
 
 	// Check all human claim options: ron, pon, chi
