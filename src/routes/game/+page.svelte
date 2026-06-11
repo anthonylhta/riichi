@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import {
 		gameState,
 		gameLoading,
@@ -33,6 +34,18 @@
 	let overview = $state<Overview | null>(null);
 	let overviewLoading = $state(false);
 	let overviewError = $state<string | null>(null);
+
+	// Exit to menu. Mid-game this abandons the game (nothing is saved until
+	// game_end — see saveFinishedGame), so it asks first; once the game is over
+	// there is nothing to lose and it navigates straight away.
+	let confirmExit = $state(false);
+	function requestExit() {
+		if (!$gameState || $gameState.phase === 'game_end') {
+			goto('/');
+			return;
+		}
+		confirmExit = true;
+	}
 
 	async function askOverview() {
 		if (overviewLoading) return;
@@ -241,12 +254,25 @@
 					<span class="honba">{$gameState.honba} 本場</span>
 				{/if}
 				<span class="wall-count">Wall {$gameState.wallEnd - $gameState.wallPos}</span>
+				<button class="menu-btn" onclick={requestExit}>Menu</button>
 				{#if isDev}
 					<button class="dev-toggle" onclick={() => (devPanelOpen = !devPanelOpen)}>
 						{devPanelOpen ? '✕ Dev' : '⚙ Dev'}
 					</button>
 				{/if}
 			</header>
+
+			<!-- Exit confirmation — docked, non-blocking, same family as the claim panel -->
+			{#if confirmExit}
+				<div class="exit-panel">
+					<span class="exit-title">Leave the game?</span>
+					<span class="exit-sub">This game is unfinished — it won't be saved.</span>
+					<div class="exit-actions">
+						<button class="exit-btn exit-stay" onclick={() => (confirmExit = false)}>Stay</button>
+						<button class="exit-btn exit-leave" onclick={() => goto('/')}>Leave</button>
+					</div>
+				</div>
+			{/if}
 
 			<!-- The table: hands at the four edges, rivers ringing the central board -->
 			<div class="board">
@@ -556,7 +582,10 @@
 						</button>
 					{/if}
 
-					<button class="action-btn" onclick={startGame}>New Game</button>
+					<div class="end-actions">
+						<button class="action-btn menu-action" onclick={() => goto('/')}>Menu</button>
+						<button class="action-btn" onclick={startGame}>New Game</button>
+					</div>
 				</div>
 			</div>
 		{/if}
@@ -677,6 +706,74 @@
 
 	.wall-count {
 		margin-left: auto;
+	}
+
+	.menu-btn {
+		padding: calc(var(--u) * 0.3) calc(var(--u) * 1.2);
+		background: none;
+		border: 1px solid #2e2a26;
+		border-radius: calc(var(--u) * 0.6);
+		color: #8a8278;
+		font-size: calc(var(--u) * 1.5);
+		cursor: pointer;
+		transition:
+			color 0.15s,
+			border-color 0.15s;
+	}
+	.menu-btn:hover {
+		color: #e8e0d5;
+		border-color: #4a443c;
+	}
+
+	/* Exit confirmation: docked under the header, board stays visible. */
+	.exit-panel {
+		position: absolute;
+		right: calc(var(--u) * 3);
+		top: calc(var(--u) * 5);
+		z-index: 50;
+		display: flex;
+		flex-direction: column;
+		gap: calc(var(--u) * 0.6);
+		padding: calc(var(--u) * 1.4) calc(var(--u) * 1.6);
+		background: rgba(20, 18, 16, 0.96);
+		border: 1px solid #3a342c;
+		border-radius: calc(var(--u) * 1.2);
+		box-shadow: 0 calc(var(--u) * 1) calc(var(--u) * 3) rgba(0, 0, 0, 0.6);
+	}
+	.exit-title {
+		font-size: calc(var(--u) * 1.7);
+		color: #cfc7bb;
+		font-weight: 600;
+	}
+	.exit-sub {
+		font-size: calc(var(--u) * 1.4);
+		color: #8a8278;
+	}
+	.exit-actions {
+		display: flex;
+		gap: calc(var(--u) * 0.8);
+		justify-content: flex-end;
+		margin-top: calc(var(--u) * 0.4);
+	}
+	.exit-btn {
+		padding: calc(var(--u) * 0.7) calc(var(--u) * 1.6);
+		border: none;
+		border-radius: calc(var(--u) * 0.6);
+		cursor: pointer;
+		font-size: calc(var(--u) * 1.6);
+		font-weight: 600;
+		transition: opacity 0.15s;
+	}
+	.exit-btn:hover {
+		opacity: 0.85;
+	}
+	.exit-stay {
+		background: #2e2a26;
+		color: #cfc7bb;
+	}
+	.exit-leave {
+		background: #c41e3a;
+		color: #fff;
 	}
 
 	/* ── Table ─────────────────────────────────────────────────────────── */
@@ -1040,6 +1137,20 @@
 
 	.action-btn:hover {
 		background: #a01830;
+	}
+
+	/* Game-end overlay: Menu (secondary) beside New Game (primary). */
+	.end-actions {
+		display: flex;
+		gap: calc(var(--u) * 1);
+		justify-content: center;
+	}
+	.menu-action {
+		background: #2e2a26;
+		color: #cfc7bb;
+	}
+	.menu-action:hover {
+		background: #3a342c;
 	}
 
 	.tsumo-btn {
