@@ -16,8 +16,12 @@
 		declareAnkan,
 		declareKakan,
 		passClaim,
-		gameLog
+		gameLog,
+		loadResumableReplay,
+		resumeGame,
+		abandonGame
 	} from '$lib/stores/game';
+	import type { ReplayLog } from '$lib/game/replay';
 	import { tileLabel } from '$lib/game/tiles';
 	import { limitName } from '$lib/game/scoring';
 	import { isTenpaiAfterDiscard } from '$lib/game/ai';
@@ -104,9 +108,29 @@
 	// discards — a reading aid (and furiten cue: a wait you've already discarded).
 	let hoveredCode = $state<number | null>(null);
 
+	// An interrupted game found in the localStorage mirror — offer to resume it
+	// before dealing fresh. Covers exit-without-leaving, tab close and F5.
+	let resumeOffer = $state<ReplayLog | null>(null);
+
 	onMount(async () => {
+		const log = loadResumableReplay();
+		if (log) {
+			resumeOffer = log;
+			return;
+		}
 		await startGame();
 	});
+
+	async function acceptResume() {
+		const log = resumeOffer;
+		resumeOffer = null;
+		if (log) await resumeGame(log);
+	}
+
+	async function declineResume() {
+		resumeOffer = null;
+		await startGame(); // overwrites the mirror — the old game is gone
+	}
 
 	async function handleTileClick(tileId: number) {
 		if (!$gameState || $gameState.phase !== 'player_discard') return;
@@ -239,6 +263,19 @@
 <div class="viewport">
 	{#if $gameLoading}
 		<div class="loading">Shuffling tiles...</div>
+	{:else if resumeOffer}
+		<div class="resume-screen">
+			<span class="resume-jp">中断した対局</span>
+			<p class="resume-title">Unfinished game found</p>
+			<p class="resume-sub">
+				You left a game on hand {resumeOffer.inputs.filter((i) => i.t === 'nextRound').length + 1}.
+				Pick up exactly where you left off? Starting a new game discards it.
+			</p>
+			<div class="resume-actions">
+				<button class="action-btn" onclick={acceptResume}>Resume 再開</button>
+				<button class="action-btn resume-new" onclick={declineResume}>New Game</button>
+			</div>
+		</div>
 	{:else if $gameError}
 		<div class="error-screen">
 			<p>Something went wrong starting the game.</p>
@@ -270,7 +307,13 @@
 					<span class="exit-sub">This game is unfinished — it won't be saved.</span>
 					<div class="exit-actions">
 						<button class="exit-btn exit-stay" onclick={() => (confirmExit = false)}>Stay</button>
-						<button class="exit-btn exit-leave" onclick={() => goto('/')}>Leave</button>
+						<button
+							class="exit-btn exit-leave"
+							onclick={() => {
+								abandonGame();
+								goto('/');
+							}}>Leave</button
+						>
 					</div>
 				</div>
 			{/if}
@@ -662,6 +705,48 @@
 		height: 100vh;
 		font-size: 1.2rem;
 		color: #888;
+	}
+
+	/* Resume offer — full-screen card shown before any game exists. */
+	.resume-screen {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		height: 100vh;
+		text-align: center;
+		padding: 0 1.5rem;
+	}
+	.resume-jp {
+		font-family: 'Noto Serif JP', serif;
+		color: #c41e3a;
+		font-size: 1rem;
+		letter-spacing: 0.15em;
+	}
+	.resume-title {
+		margin: 0;
+		font-size: 1.4rem;
+		font-weight: 700;
+		color: #e8e0d5;
+	}
+	.resume-sub {
+		margin: 0 0 0.8rem;
+		font-size: 0.9rem;
+		color: #9a9286;
+		max-width: 26rem;
+		line-height: 1.5;
+	}
+	.resume-actions {
+		display: flex;
+		gap: 0.8rem;
+	}
+	.resume-new {
+		background: #2e2a26;
+		color: #cfc7bb;
+	}
+	.resume-new:hover {
+		background: #3a342c;
 	}
 
 	/* Tile sizes scale with the stage (cq units), overriding Tile.svelte's px
