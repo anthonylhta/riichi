@@ -31,7 +31,7 @@ import {
 } from './engine';
 import { chooseDiscard, getShanten, riichiAnkanKeepsWaits } from './ai';
 import { checkWin } from './scoring';
-import type { GameState, PlayerState, RoundResult, Seat } from './types';
+import type { GameState, Meld, PlayerState, RoundResult, Seat } from './types';
 import type { GameTile } from './tiles';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -1155,5 +1155,114 @@ describe('ankan breaks the declarer’s own ippatsu', () => {
 
 		expect(result.players[0].melds.map((m) => m.type)).toEqual(['ankan']);
 		expect(result.players[1].isIppatsu).toBe(false);
+	});
+});
+
+// ─── kan needs a live-wall tile ──────────────────────────────────────────────
+
+describe('kan — illegal with an empty live wall', () => {
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+	});
+
+	const quadHand = [tile(14, 11), tile(14, 12), tile(14, 13), tile(14, 14), tile(5, 15)];
+
+	it('offers no kan options when the live wall is empty', () => {
+		const state = makeState({
+			wallPos: 70, // == wallEnd: nothing left to draw
+			players: [
+				makePlayer(0, { hand: quadHand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		expect(getPlayerKanOptions(state)).toEqual({ ankan: [], kakan: [] });
+	});
+
+	it('offers no kan options when all four rinshan tiles are used (no 5th kan)', () => {
+		const state = makeState({
+			rinshankPos: 4,
+			players: [
+				makePlayer(0, { hand: quadHand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		expect(getPlayerKanOptions(state)).toEqual({ ankan: [], kakan: [] });
+	});
+
+	it('humanDeclareAnkan refuses on an empty live wall', async () => {
+		const state = makeState({
+			wallPos: 70,
+			players: [
+				makePlayer(0, { hand: quadHand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		expect(await humanDeclareAnkan(state, 14)).toBe(state);
+	});
+
+	it('humanDeclareKakan refuses on an empty live wall', async () => {
+		const pon: Meld = {
+			type: 'pon',
+			tiles: [tile(14, 11), tile(14, 12), tile(14, 13)],
+			calledFrom: 1
+		};
+		const state = makeState({
+			wallPos: 70,
+			players: [
+				makePlayer(0, { hand: [tile(14, 14), tile(5, 15)], melds: [pon] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		expect(await humanDeclareKakan(state, 0)).toBe(state);
+	});
+
+	it('the human claim options drop the daiminkan but keep the pon', () => {
+		const state = makeState({
+			wallPos: 70,
+			players: [
+				makePlayer(0, { hand: [tile(14, 11), tile(14, 12), tile(14, 13), tile(5, 15)] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const options = getHumanClaimOptions(state, tile(14, 99), 1);
+		expect(options.map((o) => o.type)).toEqual(['pon']);
+	});
+
+	it('an AI with three matching tiles pons instead of daiminkans on an empty wall', async () => {
+		// Seat 1 holds three of the discarded tile + spares; with the wall empty the
+		// daiminkan branch must be skipped, falling through to the pon branch.
+		const state = makeState({
+			wallPos: 70,
+			players: [
+				makePlayer(0, { hand: [tile(20, 1), tile(21, 2), tile(22, 3), tile(14, 4)] }),
+				makePlayer(1, {
+					hand: [tile(14, 31), tile(14, 32), tile(14, 33), tile(5, 34), tile(6, 35)]
+				}),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 4); // discard the 5p (code 14)
+		// With an empty wall, humanDiscard's flow still applies AI calls directly.
+		expect(result.players[1].melds.map((m) => m.type)).toEqual(['pon']);
 	});
 });
