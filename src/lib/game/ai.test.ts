@@ -51,6 +51,7 @@ function makeState(player1: PlayerState, overrides: Partial<GameState> = {}): Ga
 		riichiBets: 0,
 		doraIndicators: [],
 		uraDoraIndicators: [],
+		pendingKanDora: 0,
 		anyCallMadeThisRound: false,
 		players: [makePlayer(0), player1, makePlayer(2), makePlayer(3)] as GameState['players'],
 		lastDiscard: null,

@@ -27,6 +27,7 @@ import {
 	runAiTurn,
 	humanDeclareKakan,
 	humanDeclareAnkan,
+	humanClaimDaiminkan,
 	getPlayerKanOptions
 } from './engine';
 import { chooseDiscard, getShanten, riichiAnkanKeepsWaits } from './ai';
@@ -77,6 +78,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		riichiBets: 0,
 		doraIndicators: [tile(1, 100)],
 		uraDoraIndicators: [tile(2, 101)],
+		pendingKanDora: 0,
 		anyCallMadeThisRound: false,
 		players: [makePlayer(0), makePlayer(1), makePlayer(2), makePlayer(3)] as [
 			PlayerState,
@@ -1264,5 +1266,178 @@ describe('kan — illegal with an empty live wall', () => {
 		const result = await humanDiscard(state, 4); // discard the 5p (code 14)
 		// With an empty wall, humanDiscard's flow still applies AI calls directly.
 		expect(result.players[1].melds.map((m) => m.type)).toEqual(['pon']);
+	});
+});
+
+// ─── kan dora timing ─────────────────────────────────────────────────────────
+
+describe('kan dora timing — ankan flips now, minkan after the discard settles', () => {
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+	const WIN = { isWin: true, han: 2, fu: 30, score: 2000, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockClear();
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+	});
+
+	const doraEvents = (s: GameState) => s.events.filter((e) => e.type === 'dora');
+
+	it('an ankan reveals the new indicator immediately', async () => {
+		const state = makeState({
+			players: [
+				makePlayer(0, {
+					hand: [tile(14, 11), tile(14, 12), tile(14, 13), tile(14, 14), tile(5, 15)]
+				}),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDeclareAnkan(state, 14);
+
+		expect(result.doraIndicators).toHaveLength(2);
+		expect(result.uraDoraIndicators).toHaveLength(2);
+		expect(result.pendingKanDora).toBe(0);
+		expect(doraEvents(result)).toHaveLength(1);
+	});
+
+	const daiminkanState = (players2and3: PlayerState[] = [makePlayer(2), makePlayer(3)]) =>
+		makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(14, 99),
+			lastDiscardSeat: 1,
+			players: [
+				makePlayer(0, {
+					hand: [tile(14, 11), tile(14, 12), tile(14, 13), tile(5, 15), tile(6, 16)]
+				}),
+				makePlayer(1),
+				...players2and3
+			] as GameState['players']
+		});
+
+	it('a daiminkan defers the indicator until the post-kan discard passes', async () => {
+		const afterKan = await humanClaimDaiminkan(daiminkanState(), [
+			tile(14, 11),
+			tile(14, 12),
+			tile(14, 13)
+		]);
+
+		expect(afterKan.doraIndicators).toHaveLength(1); // still hidden
+		expect(afterKan.uraDoraIndicators).toHaveLength(1);
+		expect(afterKan.pendingKanDora).toBe(1);
+		expect(doraEvents(afterKan)).toHaveLength(0);
+
+		// The kan player's discard survives every ron check → the indicator flips.
+		const afterDiscard = await humanDiscard(afterKan, 15);
+
+		expect(afterDiscard.doraIndicators).toHaveLength(2);
+		expect(afterDiscard.uraDoraIndicators).toHaveLength(2);
+		expect(afterDiscard.pendingKanDora).toBe(0);
+		expect(doraEvents(afterDiscard)).toHaveLength(1);
+	});
+
+	it('a ron on the post-kan discard does NOT count the new indicator', async () => {
+		// Seat 2 wins on anything once its marker hand is consulted.
+		vi.mocked(checkWin).mockImplementation(async (input: { handCodes: number[] }) =>
+			input.handCodes.includes(34) ? WIN : NO_WIN
+		);
+		const afterKan = await humanClaimDaiminkan(
+			daiminkanState([makePlayer(2, { hand: [tile(34, 70)] }), makePlayer(3)]),
+			[tile(14, 11), tile(14, 12), tile(14, 13)]
+		);
+		expect(afterKan.pendingKanDora).toBe(1);
+
+		const afterDiscard = await humanDiscard(afterKan, 15);
+
+		expect(afterDiscard.phase).toBe('round_end');
+		expect(afterDiscard.roundResult?.winner).toBe(2);
+		// The deferred indicator never flipped — and the winning score was
+		// computed against the pre-kan indicators only.
+		expect(afterDiscard.doraIndicators).toHaveLength(1);
+		const winningCall = vi
+			.mocked(checkWin)
+			.mock.calls.find(([input]) => input.handCodes.includes(34) && input.ronTileCode !== null);
+		expect(winningCall).toBeDefined();
+		expect(winningCall![0].doraIndicators).toHaveLength(1);
+	});
+
+	it('a kakan defers the indicator too', async () => {
+		const pon: Meld = {
+			type: 'pon',
+			tiles: [tile(14, 11), tile(14, 12), tile(14, 13)],
+			calledFrom: 1
+		};
+		const state = makeState({
+			players: [
+				makePlayer(0, { hand: [tile(14, 14), tile(5, 15)], melds: [pon] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDeclareKakan(state, 0);
+
+		expect(result.players[0].melds.map((m) => m.type)).toEqual(['kakan']);
+		expect(result.doraIndicators).toHaveLength(1);
+		expect(result.pendingKanDora).toBe(1);
+	});
+
+	it('claiming the post-kan discard (pon) still flips the deferred indicator', () => {
+		// An AI minkan'd and discarded; the human pons that discard. The discard
+		// wasn't ronned, so the deferred indicator must flip with the claim.
+		const state = makeState({
+			phase: 'claim_decision',
+			pendingKanDora: 1,
+			lastDiscard: tile(23, 99),
+			lastDiscardSeat: 1,
+			players: [
+				makePlayer(0, { hand: [tile(23, 1), tile(23, 2), tile(5, 3)] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = humanClaimPon(state, [tile(23, 1), tile(23, 2)]);
+
+		expect(result.doraIndicators).toHaveLength(2);
+		expect(result.pendingKanDora).toBe(0);
+	});
+
+	it('an AI kakan defers and flips after its own discard settles', async () => {
+		vi.mocked(chooseDiscard).mockImplementation((seat: Seat, st: GameState) => {
+			const hand = st.players[seat].hand;
+			return hand[hand.length - 1];
+		});
+		const pon: Meld = {
+			type: 'pon',
+			tiles: [tile(14, 61), tile(14, 62), tile(14, 63)],
+			calledFrom: 0
+		};
+		const aiHand = [
+			...[1, 2, 3, 7, 8, 9, 20, 21, 22].map((c, i) => tile(c, 50 + i)),
+			tile(14, 64) // the 4th copy for the kakan
+		];
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 3,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3, { hand: aiHand, melds: [pon], difficulty: 'good' })
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.players[3].melds.map((m) => m.type)).toEqual(['kakan']);
+		// The kan deferred its indicator, the AI's own discard then settled
+		// unronned within the same turn — so it is revealed by the end.
+		expect(result.pendingKanDora).toBe(0);
+		expect(result.doraIndicators).toHaveLength(2);
 	});
 });
