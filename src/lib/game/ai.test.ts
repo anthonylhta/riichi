@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 // Unlike engine.test.ts, ai.ts is exercised against the REAL shanten library
 // (mahjong-tile-efficiency runs fine under vitest — see ADR 0016 for the same
 // approach with riichi-rs), so these tests verify actual tenpai detection.
-import { chooseDiscard, shouldDeclareRiichi } from './ai';
+import { chooseDiscard, getWaits, riichiAnkanKeepsWaits, shouldDeclareRiichi } from './ai';
 import type { GameState, PlayerState, Seat, Meld } from './types';
 import type { GameTile } from './tiles';
 
@@ -147,5 +147,38 @@ describe('chooseDiscard — riichi locks the hand', () => {
 
 		const pick = chooseDiscard(1, state);
 		expect(pick.code).toBe(24); // 6s, the safe tile
+	});
+});
+
+describe('getWaits', () => {
+	it('finds the waits of a closed tenpai hand', () => {
+		// 123m 456m 789m 11p 56s — waits 4s/7s
+		expect(getWaits([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 23, 24])).toEqual([22, 25]);
+	});
+
+	it('handles a partial hand (concealed tiles beside a fixed meld)', () => {
+		// 456m 789m 44p 12s — the 10 concealed tiles left after an ankan; waits 3s
+		expect(getWaits([4, 5, 6, 7, 8, 9, 13, 13, 19, 20])).toEqual([21]);
+	});
+
+	it('returns no waits for a hand that is not tenpai', () => {
+		// 13 isolated-ish tiles, nowhere near tenpai
+		expect(getWaits([1, 4, 7, 11, 14, 17, 21, 24, 27, 28, 29, 30, 31])).toEqual([]);
+	});
+});
+
+describe('riichiAnkanKeepsWaits', () => {
+	it('allows the kan when the quad is a free-standing ankou (wait unchanged)', () => {
+		// Locked hand 111m 456m 789m 44p 12s waits on 3s; drawing the 4th 1m and
+		// kanning it leaves 456m 789m 44p 12s — still waiting on 3s alone.
+		const hand = [1, 1, 1, 1, 4, 5, 6, 7, 8, 9, 13, 13, 19, 20];
+		expect(riichiAnkanKeepsWaits(hand, 1)).toBe(true);
+	});
+
+	it('refuses the kan when it changes the wait', () => {
+		// Pure chuuren shape 1112345678999m waits on every manzu; kanning the
+		// drawn 4th 1m collapses that to a fraction of the original wait set.
+		const hand = [1, 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9];
+		expect(riichiAnkanKeepsWaits(hand, 1)).toBe(false);
 	});
 });

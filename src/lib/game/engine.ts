@@ -9,7 +9,7 @@ import type {
 	RoundResult,
 	Seat
 } from './types';
-import { chooseDiscard, getShanten, shouldDeclareRiichi } from './ai';
+import { chooseDiscard, getShanten, riichiAnkanKeepsWaits, shouldDeclareRiichi } from './ai';
 import { checkWin } from './scoring';
 import type { GameEvent, Scores } from './events';
 
@@ -522,6 +522,21 @@ function getAnkanOptions(player: PlayerState): TileCode[] {
 	for (const [code, count] of counts) {
 		if (count >= 4) result.push(code);
 	}
+	// A riichi hand is locked: ankan is legal only on the just-drawn tile (the
+	// hand's last — draws append, sorting happens on discard, and a riichi hand
+	// can't call) and only when it leaves the wait unchanged. This single gate
+	// covers every offer site, human (getPlayerKanOptions) and AI (runAiTurn).
+	if (player.isRiichi) {
+		const drawn = player.hand[player.hand.length - 1];
+		return result.filter(
+			(code) =>
+				code === drawn.code &&
+				riichiAnkanKeepsWaits(
+					player.hand.map((t) => t.code),
+					code
+				)
+		);
+	}
 	return result;
 }
 
@@ -934,8 +949,10 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return state;
 
 	const player = state.players[0];
+	// Validate through the same gate that offers the kan — in riichi this also
+	// enforces just-drawn-tile-only and wait preservation.
+	if (!getAnkanOptions(player).includes(code)) return state;
 	const matching = player.hand.filter((t) => t.code === code);
-	if (matching.length < 4) return state;
 
 	const players = clonePlayers(state);
 	players[0].hand = sortHand(player.hand.filter((t) => t.code !== code));
