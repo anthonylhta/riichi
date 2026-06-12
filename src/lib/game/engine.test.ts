@@ -1657,3 +1657,103 @@ describe('AI riichi — the ippatsu window survives the declaring discard', () =
 		expect(result.players[1].isIppatsu).toBe(false);
 	});
 });
+
+// ─── post-call detection with kan melds ──────────────────────────────────────
+
+describe('runAiTurn — a kan meld does not make later turns look post-call', () => {
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+		vi.mocked(shouldDeclareRiichi).mockReturnValue(false);
+		vi.mocked(chooseDiscard).mockImplementation((seat: Seat, st: GameState) => {
+			const hand = st.players[seat].hand;
+			return hand[hand.length - 1];
+		});
+	});
+
+	it('an AI holding an ankan draws on its turn (10 concealed + 4 meld tiles)', async () => {
+		const ankan: Meld = {
+			type: 'ankan',
+			tiles: [tile(14, 61), tile(14, 62), tile(14, 63), tile(14, 64)],
+			calledFrom: null
+		};
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 1,
+			players: [
+				makePlayer(0),
+				makePlayer(1, {
+					hand: Array.from({ length: 10 }, (_, i) => tile(i + 1, 30 + i)),
+					melds: [ankan]
+				}),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		// Drew (wall advanced), then discarded — the hand is back to 10 tiles.
+		expect(result.wallPos).toBe(state.wallPos + 1);
+		expect(result.players[1].hand).toHaveLength(10);
+		expect(result.players[1].discards).toHaveLength(1);
+	});
+
+	it('a genuine post-call hand (pon, 11 concealed + 3 meld tiles) still skips the draw', async () => {
+		const pon: Meld = {
+			type: 'pon',
+			tiles: [tile(14, 61), tile(14, 62), tile(14, 63)],
+			calledFrom: 0
+		};
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 1,
+			players: [
+				makePlayer(0),
+				makePlayer(1, {
+					hand: Array.from({ length: 11 }, (_, i) => tile(i + 1, 30 + i)),
+					melds: [pon]
+				}),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		// No draw — the call already provided the 14th tile.
+		expect(result.wallPos).toBe(state.wallPos);
+		expect(result.players[1].hand).toHaveLength(10);
+		expect(result.players[1].discards).toHaveLength(1);
+	});
+
+	it('post-kan: the turn right after the kan discards the rinshan-completed hand without drawing', async () => {
+		// 11 concealed + 4-tile kan = the state immediately after a kan's rinshan
+		// draw (the kan turn itself) — this IS post-call-like and must not draw.
+		const ankan: Meld = {
+			type: 'ankan',
+			tiles: [tile(14, 61), tile(14, 62), tile(14, 63), tile(14, 64)],
+			calledFrom: null
+		};
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 1,
+			players: [
+				makePlayer(0),
+				makePlayer(1, {
+					hand: Array.from({ length: 11 }, (_, i) => tile(i + 1, 30 + i)),
+					melds: [ankan]
+				}),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.wallPos).toBe(state.wallPos);
+		expect(result.players[1].hand).toHaveLength(10);
+	});
+});

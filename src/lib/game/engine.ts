@@ -1178,7 +1178,14 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	const preDraw = state.players[seat];
 	const totalTiles =
 		preDraw.hand.length + preDraw.melds.reduce((acc, m) => acc + m.tiles.length, 0);
-	const isPostCall = totalTiles >= 14 && preDraw.hand.length > 0;
+	// A kan meld holds 4 tiles but counts as one set, so a hand merely WAITING
+	// to draw already totals 14 with one kan (10 concealed + 4). Without the kan
+	// adjustment (same as checkTsumo's), every turn after a kan looked
+	// "post-call": the AI silently skipped its next draw, then played the rest
+	// of the round a tile short — and, with checkTsumo kan-adjusted, could never
+	// tsumo again. See notes/bugs/2026-06-12-ai-kan-meld-skips-next-draw.md.
+	const kanCount = preDraw.melds.filter((m) => m.tiles.length === 4).length;
+	const isPostCall = totalTiles >= 14 + kanCount && preDraw.hand.length > 0;
 
 	let s = isPostCall ? state : drawTile(state, seat);
 
