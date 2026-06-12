@@ -1062,3 +1062,98 @@ describe('riichi ankan — just-drawn tile + wait preservation', () => {
 		expect(result.players[3].melds.map((m) => m.type)).toEqual(['ankan']);
 	});
 });
+
+// ─── ankan breaks own ippatsu ────────────────────────────────────────────────
+
+describe('ankan breaks the declarer’s own ippatsu', () => {
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockClear();
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+		vi.mocked(riichiAnkanKeepsWaits).mockReturnValue(true);
+	});
+
+	it('human: riichi → ankan → the rinshan tsumo check sees no ippatsu', async () => {
+		// In riichi with the ippatsu window open, holding three 5p + the drawn 4th.
+		const player = makePlayer(0, {
+			isRiichi: true,
+			isIppatsu: true,
+			hand: [
+				...[1, 2, 3, 7, 8, 9, 20, 21, 22, 30].map((c, i) => tile(c, i + 1)),
+				tile(14, 11),
+				tile(14, 12),
+				tile(14, 13),
+				tile(14, 99)
+			]
+		});
+		const state = makeState({
+			players: [player, makePlayer(1), makePlayer(2), makePlayer(3)] as GameState['players']
+		});
+
+		const result = await humanDeclareAnkan(state, 14);
+
+		expect(result.players[0].melds.map((m) => m.type)).toEqual(['ankan']);
+		expect(result.players[0].isIppatsu).toBe(false);
+		// The rinshan tsumo check (afterKan) must already score without ippatsu
+		const kanTsumoCall = vi
+			.mocked(checkWin)
+			.mock.calls.find(([input]) => input.afterKan === true && input.isTsumo === true);
+		expect(kanTsumoCall).toBeDefined();
+		expect(kanTsumoCall![0].isIppatsu).toBe(false);
+	});
+
+	it('AI: riichi → ankan → the rinshan tsumo check sees no ippatsu', async () => {
+		vi.mocked(chooseDiscard).mockImplementation((seat: Seat, st: GameState) => {
+			const hand = st.players[seat].hand;
+			return hand[hand.length - 1];
+		});
+		// Seat 3 (good AI) in riichi/ippatsu holds three 5p; liveWall[13] is the 4th.
+		const aiHand = [
+			...[1, 2, 3, 7, 8, 9, 20, 21, 22, 30].map((c, i) => tile(c, 50 + i)),
+			tile(14, 61),
+			tile(14, 62),
+			tile(14, 63)
+		];
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 3,
+			wallPos: 13,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3, { hand: aiHand, isRiichi: true, isIppatsu: true, difficulty: 'good' })
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.players[3].melds.map((m) => m.type)).toEqual(['ankan']);
+		const kanTsumoCall = vi
+			.mocked(checkWin)
+			.mock.calls.find(([input]) => input.afterKan === true && input.isTsumo === true);
+		expect(kanTsumoCall).toBeDefined();
+		expect(kanTsumoCall![0].isIppatsu).toBe(false);
+	});
+
+	it('still clears the other seats’ ippatsu as before', async () => {
+		const player = makePlayer(0, {
+			hand: [tile(14, 11), tile(14, 12), tile(14, 13), tile(14, 14), tile(5, 15)]
+		});
+		const state = makeState({
+			players: [
+				player,
+				makePlayer(1, { isRiichi: true, isIppatsu: true }),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDeclareAnkan(state, 14);
+
+		expect(result.players[0].melds.map((m) => m.type)).toEqual(['ankan']);
+		expect(result.players[1].isIppatsu).toBe(false);
+	});
+});

@@ -960,8 +960,9 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 		...player.melds,
 		{ type: 'ankan', tiles: matching.slice(0, 4), calledFrom: null }
 	];
-	// Ankan doesn't cancel ippatsu but does mark a call made
-	for (const p of players) if (p.seat !== 0) p.isIppatsu = false;
+	// ANY call breaks ippatsu for everyone — including the kan declarer's own.
+	// (Riichi → ankan → rinshan tsumo scores rinshan only, never ippatsu.)
+	for (const p of players) p.isIppatsu = false;
 	const postKan = pushEvent(
 		{ ...state, players, anyCallMadeThisRound: true },
 		{ type: 'ankan', seat: 0, consumed: matching.slice(0, 4) }
@@ -1144,7 +1145,8 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 				...aiPlayer.melds,
 				{ type: 'ankan' as const, tiles: matching.slice(0, 4), calledFrom: null }
 			];
-			for (const p of players) if (p.seat !== seat) p.isIppatsu = false;
+			// Own kan breaks own ippatsu too — same rule as the human ankan path.
+			for (const p of players) p.isIppatsu = false;
 			const postKan = pushEvent(
 				{ ...s, players, anyCallMadeThisRound: true },
 				{ type: 'ankan', seat, consumed: matching.slice(0, 4) }
