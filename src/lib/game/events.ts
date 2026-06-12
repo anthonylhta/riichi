@@ -8,9 +8,9 @@
 // this stream rather than re-interpreting engine states.
 //
 // Events reflect what the engine actually did — including its known rule
-// deviations (e.g. the riichi stick is paid even when the riichi tile is ronned;
-// kan dora flips immediately on every kan type). The export must stay honest to
-// the game as played, not to the rulebook.
+// deviations (e.g. the riichi stick is paid even when the riichi tile is
+// ronned). The export must stay honest to the game as played, not to the
+// rulebook.
 
 import type { GameTile } from './tiles';
 import type { Seat } from './types';

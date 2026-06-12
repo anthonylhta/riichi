@@ -116,6 +116,7 @@ function initRound(
 		rinshankPos: 0,
 		doraIndicators,
 		uraDoraIndicators,
+		pendingKanDora: 0,
 		anyCallMadeThisRound: false,
 		riichiBets,
 		players,
@@ -563,7 +564,38 @@ function getKakanOptions(player: PlayerState): { meldIndex: number; code: TileCo
 	return options;
 }
 
-function drawRinshan(state: GameState, seat: Seat): GameState {
+// Flip the next dora + ura indicator pair. Indicator slots are capped at five
+// (deadWall[4..8] / [9..13]); a kan beyond that reveals nothing more.
+function revealNextKanDora(state: GameState): GameState {
+	const newDoraIdx = 4 + state.doraIndicators.length;
+	const newUraDoraIdx = 9 + state.uraDoraIndicators.length;
+	if (newDoraIdx >= 9) return state;
+	const indicator = state.deadWall[newDoraIdx];
+	const revealed: GameState = {
+		...state,
+		doraIndicators: [...state.doraIndicators, indicator],
+		uraDoraIndicators:
+			newUraDoraIdx < state.deadWall.length
+				? [...state.uraDoraIndicators, state.deadWall[newUraDoraIdx]]
+				: state.uraDoraIndicators
+	};
+	return pushEvent(revealed, { type: 'dora', indicator });
+}
+
+// Commit deferred minkan dora, one indicator pair per pending kan. Called once
+// the kan player's discard has survived every ron check — a ron on that discard
+// ends the round with these still face-down (the new indicator doesn't count).
+function revealPendingKanDora(state: GameState): GameState {
+	let s = state;
+	while (s.pendingKanDora > 0) {
+		s = revealNextKanDora({ ...s, pendingKanDora: s.pendingKanDora - 1 });
+	}
+	return s;
+}
+
+// `revealNow` — an ankan flips its new dora indicator immediately; a daiminkan
+// or kakan defers it (pendingKanDora) until the kan player's discard settles.
+function drawRinshan(state: GameState, seat: Seat, revealNow: boolean): GameState {
 	if (state.rinshankPos >= 4) {
 		return applyExhaustiveDraw(state);
 	}
@@ -572,16 +604,6 @@ function drawRinshan(state: GameState, seat: Seat): GameState {
 	const players = clonePlayers(state);
 	players[seat].hand = [...players[seat].hand, tile];
 
-	// Flip a new dora + ura dora indicator after each kan
-	const newDoraIdx = 4 + state.doraIndicators.length;
-	const newUraDoraIdx = 9 + state.uraDoraIndicators.length;
-	const newDoraIndicators =
-		newDoraIdx < 9 ? [...state.doraIndicators, state.deadWall[newDoraIdx]] : state.doraIndicators;
-	const newUraDoraIndicators =
-		newUraDoraIdx < state.deadWall.length
-			? [...state.uraDoraIndicators, state.deadWall[newUraDoraIdx]]
-			: state.uraDoraIndicators;
-
 	let drawn: GameState = {
 		...state,
 		players,
@@ -589,8 +611,6 @@ function drawRinshan(state: GameState, seat: Seat): GameState {
 		// The dead wall replenishes from the live wall's tail, so the kan costs the
 		// round its final draw — keeping total draws (and haitei timing) correct
 		wallEnd: state.wallEnd - 1,
-		doraIndicators: newDoraIndicators,
-		uraDoraIndicators: newUraDoraIndicators,
 		turnCount: state.turnCount + 1,
 		phase: seat === 0 ? 'player_discard' : 'ai_turn',
 		currentSeat: seat,
@@ -599,13 +619,9 @@ function drawRinshan(state: GameState, seat: Seat): GameState {
 		claimOptions: null
 	};
 	drawn = pushEvent(drawn, { type: 'draw', seat, tile, rinshan: true });
-	if (newDoraIndicators !== state.doraIndicators) {
-		drawn = pushEvent(drawn, {
-			type: 'dora',
-			indicator: newDoraIndicators[newDoraIndicators.length - 1]
-		});
-	}
-	return drawn;
+	return revealNow
+		? revealNextKanDora(drawn)
+		: { ...drawn, pendingKanDora: drawn.pendingKanDora + 1 };
 }
 
 export function getHumanClaimOptions(
@@ -733,7 +749,7 @@ async function applyAiCalls(
 					consumed: [...daiminkanTiles]
 				}
 			);
-			const drawn = drawRinshan(postKan, seat);
+			const drawn = drawRinshan(postKan, seat, false);
 			return { ...drawn, phase: 'ai_turn', currentSeat: seat };
 		}
 
@@ -872,7 +888,8 @@ export async function humanDiscard(
 		if (ron) return applyRoundResult(newState, ron);
 	}
 
-	return applyAiCalls(newState, tile, 0);
+	// The discard survived every ron check — flip any deferred minkan dora.
+	return applyAiCalls(revealPendingKanDora(newState), tile, 0);
 }
 
 export async function humanDeclareTsumo(state: GameState): Promise<GameState> {
@@ -898,8 +915,9 @@ function applyCall(state: GameState, players: ReturnType<typeof clonePlayers>): 
 
 export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameState {
 	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
-
 	const calledTile = state.lastDiscard;
+	// Claiming the discard means it wasn't ronned — flip any deferred minkan dora.
+	state = revealPendingKanDora(state);
 	const player = state.players[0];
 
 	const meld: Meld = {
@@ -927,8 +945,9 @@ export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameStat
 
 export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameState {
 	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
-
 	const calledTile = state.lastDiscard;
+	// Claiming the discard means it wasn't ronned — flip any deferred minkan dora.
+	state = revealPendingKanDora(state);
 	const player = state.players[0];
 
 	const meld: Meld = {
@@ -978,7 +997,7 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 		{ type: 'ankan', seat: 0, consumed: matching.slice(0, 4) }
 	);
 
-	const drawn = drawRinshan(postKan, 0);
+	const drawn = drawRinshan(postKan, 0, true);
 	const tsumo = await checkTsumo(drawn, 0, true);
 	return { ...drawn, pendingTsumo: tsumo };
 }
@@ -1018,7 +1037,7 @@ export async function humanDeclareKakan(state: GameState, meldIndex: number): Pr
 	for (const p of players) p.isIppatsu = false;
 	const postKan = { ...declared, players, anyCallMadeThisRound: true };
 
-	const drawn = drawRinshan(postKan, 0);
+	const drawn = drawRinshan(postKan, 0, false);
 	const tsumo = await checkTsumo(drawn, 0, true);
 	return { ...drawn, pendingTsumo: tsumo };
 }
@@ -1029,8 +1048,11 @@ export async function humanClaimDaiminkan(
 ): Promise<GameState> {
 	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
 	if (!canKan(state)) return state;
-
 	const calledTile = state.lastDiscard;
+	// Claiming the discard means it wasn't ronned — flip any deferred minkan
+	// dora before this kan defers its own.
+	state = revealPendingKanDora(state);
+
 	const player = state.players[0];
 
 	const meld: Meld = {
@@ -1052,7 +1074,7 @@ export async function humanClaimDaiminkan(
 		tile: calledTile,
 		consumed: [...handTiles]
 	});
-	const drawn = drawRinshan(postKan, 0);
+	const drawn = drawRinshan(postKan, 0, false);
 	const tsumo = await checkTsumo(drawn, 0, true);
 	return { ...drawn, pendingTsumo: tsumo };
 }
@@ -1103,17 +1125,20 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 		if (ron) return applyRoundResult(cleared, ron);
 	}
 
-	const afterAiCalls = await applyAiCalls(cleared, discardTile, discarderSeat);
-	if (afterAiCalls !== cleared) return afterAiCalls;
+	// The discard survived every ron check — flip any deferred minkan dora.
+	const settled = revealPendingKanDora(cleared);
+
+	const afterAiCalls = await applyAiCalls(settled, discardTile, discarderSeat);
+	if (afterAiCalls !== settled) return afterAiCalls;
 
 	// No AI claimed — advance normally.
 	if (nextSeat === 0) {
-		const drawn = drawTile(cleared, 0);
+		const drawn = drawTile(settled, 0);
 		const tsumo = await checkTsumo(drawn, 0);
 		return { ...drawn, pendingTsumo: tsumo };
 	}
 
-	return { ...cleared, currentSeat: nextSeat };
+	return { ...settled, currentSeat: nextSeat };
 }
 
 export async function runAiTurn(state: GameState): Promise<GameState> {
@@ -1164,7 +1189,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 				{ ...s, players, anyCallMadeThisRound: true },
 				{ type: 'ankan', seat, consumed: matching.slice(0, 4) }
 			);
-			s = drawRinshan(postKan, seat);
+			s = drawRinshan(postKan, seat, true);
 			const kanTsumo = await checkTsumo(s, seat, true);
 			if (kanTsumo) return applyRoundResult(s, kanTsumo);
 		}
@@ -1199,7 +1224,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 					i === meldIndex ? { ...m, type: 'kakan' as const, tiles: [...m.tiles, addedTile] } : m
 				);
 				for (const p of players) p.isIppatsu = false;
-				s = drawRinshan({ ...s, players, anyCallMadeThisRound: true }, seat);
+				s = drawRinshan({ ...s, players, anyCallMadeThisRound: true }, seat, false);
 				const kanTsumo = await checkTsumo(s, seat, true);
 				if (kanTsumo) return applyRoundResult(s, kanTsumo);
 			}
@@ -1266,6 +1291,11 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		const ron = await aiCheckRon(s, claimant, discardTile, seat);
 		if (ron) return applyRoundResult(s, ron);
 	}
+
+	// The discard survived every ron check — flip any deferred minkan dora. (In
+	// the claim_decision path above the human can still ron, so the flip waits
+	// for humanPassClaim / a claim handler instead.)
+	s = revealPendingKanDora(s);
 
 	// Check AI pon/chi/daiminkan
 	const afterAiCalls = await applyAiCalls(s, discardTile, seat);

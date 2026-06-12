@@ -47,6 +47,7 @@ function stateWith(p: PlayerState): GameState {
 		riichiBets: 0,
 		doraIndicators: [t(33, 600)], // arbitrary, no bearing on the yaku
 		uraDoraIndicators: [t(34, 601)],
+		pendingKanDora: 0,
 		anyCallMadeThisRound: true,
 		players: [
 			p,
