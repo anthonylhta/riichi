@@ -240,9 +240,14 @@ export function toTenhou6(events: GameEvent[], names: string[] = DEFAULT_NAMES):
 		}
 	}
 
-	// "East" marks the game as tonpuusen for the parser; aka > 0 marks red
-	// fives in play (the tiles themselves carry it via 51/52/53).
-	return { log, name: [...names], rule: { disp: 'East', aka: 1 } };
+	// Deliberately labeled as a hanchan even though our games are tonpuusen:
+	// mjai-reviewer derives the game length from `disp` alone (東/"East" →
+	// tonpuu) and HARD-REJECTS tonpuusen ("Mortal supports hanchan games
+	// only"), on the site and the CLI alike. The accurate label makes the file
+	// useless; the mislabel only skews Mortal's late-game placement context
+	// (it won't know East-4 is all-last). ADR 0052. aka > 0 marks red fives in
+	// play (the tiles themselves carry it via 51/52/53).
+	return { log, name: [...names], rule: { disp: 'South', aka: 1 } };
 }
 
 export function toTenhou6Json(events: GameEvent[], names?: string[]): string {
