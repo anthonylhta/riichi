@@ -123,6 +123,33 @@ export function shouldDeclareRiichi(seat: Seat, state: GameState): boolean {
 	return shanten === 0;
 }
 
+// All winning tiles (waits) of a hand, from its concealed codes only. Melds are
+// fixed sets and don't constrain the remaining shape, so a post-ankan 10-tile
+// hand is evaluated the same way as a closed 13-tile one: a code is a wait when
+// adding it completes the hand (shanten -1). Returns codes in ascending order.
+export function getWaits(codes: TileCode[]): TileCode[] {
+	const waits: TileCode[] = [];
+	for (let c = 1; c <= 34; c++) {
+		if (getShanten([...codes, c]) === -1) waits.push(c);
+	}
+	return waits;
+}
+
+// During riichi an ankan is legal only if it leaves the wait unchanged: the
+// wait set of the locked 13-tile hand (the 14-tile hand minus the drawn 4th
+// copy) must equal the wait set with the whole quad set aside as a fixed meld.
+// `handCodes` is the full 14-tile hand containing all four copies of `code`.
+export function riichiAnkanKeepsWaits(handCodes: TileCode[], code: TileCode): boolean {
+	const before = [...handCodes];
+	before.splice(before.indexOf(code), 1);
+	const after = handCodes.filter((c) => c !== code);
+	const waitsBefore = getWaits(before);
+	const waitsAfter = getWaits(after);
+	return (
+		waitsBefore.length === waitsAfter.length && waitsBefore.every((c, i) => c === waitsAfter[i])
+	);
+}
+
 // Check if discarding a specific tile leaves the hand tenpai
 export function isTenpaiAfterDiscard(hand: GameTile[], discardId: number): boolean {
 	const remaining = hand.filter((t) => t.id !== discardId).map((t) => t.code);

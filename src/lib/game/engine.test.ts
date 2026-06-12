@@ -5,7 +5,8 @@ vi.mock('./ai', () => ({
 	getShanten: vi.fn().mockReturnValue(8),
 	chooseDiscard: vi.fn(),
 	shouldDeclareRiichi: vi.fn().mockReturnValue(false),
-	isTenpaiAfterDiscard: vi.fn().mockReturnValue(false)
+	isTenpaiAfterDiscard: vi.fn().mockReturnValue(false),
+	riichiAnkanKeepsWaits: vi.fn().mockReturnValue(true)
 }));
 
 vi.mock('./scoring', () => ({
@@ -24,9 +25,11 @@ import {
 	getHumanClaimOptions,
 	continueGame,
 	runAiTurn,
-	humanDeclareKakan
+	humanDeclareKakan,
+	humanDeclareAnkan,
+	getPlayerKanOptions
 } from './engine';
-import { chooseDiscard, getShanten } from './ai';
+import { chooseDiscard, getShanten, riichiAnkanKeepsWaits } from './ai';
 import { checkWin } from './scoring';
 import type { GameState, PlayerState, RoundResult, Seat } from './types';
 import type { GameTile } from './tiles';
@@ -897,5 +900,165 @@ describe('kan — live wall shortening (haitei timing)', () => {
 		expect(result.phase).toBe('round_end');
 		expect(result.roundResult).toBeNull();
 		expect(result.exhaustiveDrawResult).not.toBeNull();
+	});
+});
+
+// ─── riichi ankan gate ───────────────────────────────────────────────────────
+
+describe('riichi ankan — just-drawn tile + wait preservation', () => {
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+		vi.mocked(riichiAnkanKeepsWaits).mockClear();
+		vi.mocked(riichiAnkanKeepsWaits).mockReturnValue(true);
+	});
+
+	// A riichi hand holding three 5p with the 4th just drawn (appended last).
+	const riichiQuadPlayer = () =>
+		makePlayer(0, {
+			isRiichi: true,
+			hand: [
+				...[1, 2, 3, 7, 8, 9, 20, 21, 22, 30].map((c, i) => tile(c, i + 1)),
+				tile(14, 11),
+				tile(14, 12),
+				tile(14, 13),
+				tile(14, 99) // the drawn 4th copy
+			]
+		});
+
+	it('offers the ankan when the quad is the drawn tile and the wait is preserved', () => {
+		const state = makeState({
+			players: [
+				riichiQuadPlayer(),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		expect(getPlayerKanOptions(state).ankan).toEqual([14]);
+	});
+
+	it('suppresses the ankan when it would change the wait', () => {
+		vi.mocked(riichiAnkanKeepsWaits).mockReturnValue(false);
+		const state = makeState({
+			players: [
+				riichiQuadPlayer(),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		expect(getPlayerKanOptions(state).ankan).toEqual([]);
+	});
+
+	it('suppresses an ankan of a quad that is not the just-drawn tile', () => {
+		// The full quad sat in the hand before this draw; the drawn tile is a 1z.
+		const player = makePlayer(0, {
+			isRiichi: true,
+			hand: [
+				...[1, 2, 3, 7, 8, 9, 20, 21, 22].map((c, i) => tile(c, i + 1)),
+				tile(14, 11),
+				tile(14, 12),
+				tile(14, 13),
+				tile(14, 14),
+				tile(28, 99) // drawn tile, not part of the quad
+			]
+		});
+		const state = makeState({
+			players: [player, makePlayer(1), makePlayer(2), makePlayer(3)] as GameState['players']
+		});
+
+		expect(getPlayerKanOptions(state).ankan).toEqual([]);
+		expect(riichiAnkanKeepsWaits).not.toHaveBeenCalled();
+	});
+
+	it('does not consult the gate outside riichi', () => {
+		const player = makePlayer(0, {
+			hand: [tile(14, 11), tile(14, 12), tile(14, 13), tile(14, 14), tile(5, 15)]
+		});
+		const state = makeState({
+			players: [player, makePlayer(1), makePlayer(2), makePlayer(3)] as GameState['players']
+		});
+
+		expect(getPlayerKanOptions(state).ankan).toEqual([14]);
+		expect(riichiAnkanKeepsWaits).not.toHaveBeenCalled();
+	});
+
+	it('humanDeclareAnkan refuses a wait-changing kan during riichi', async () => {
+		vi.mocked(riichiAnkanKeepsWaits).mockReturnValue(false);
+		const state = makeState({
+			players: [
+				riichiQuadPlayer(),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDeclareAnkan(state, 14);
+
+		expect(result).toBe(state); // rejected outright — no meld, no rinshan draw
+	});
+
+	it('a riichi AI does not kan a fresh quad that would change its wait', async () => {
+		vi.mocked(riichiAnkanKeepsWaits).mockReturnValue(false);
+		vi.mocked(chooseDiscard).mockImplementation((seat: Seat, st: GameState) => {
+			const hand = st.players[seat].hand;
+			return hand[hand.length - 1];
+		});
+		// Seat 3 (good AI) in riichi holds three 5p; liveWall[wallPos] is the 4th.
+		const aiHand = [
+			...[1, 2, 3, 7, 8, 9, 20, 21, 22, 30].map((c, i) => tile(c, 50 + i)),
+			tile(14, 61),
+			tile(14, 62),
+			tile(14, 63)
+		];
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 3,
+			wallPos: 13, // liveWall[13] has code (13 % 34) + 1 = 14 (5p)
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3, { hand: aiHand, isRiichi: true, difficulty: 'good' })
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.players[3].melds).toEqual([]);
+	});
+
+	it('a riichi AI still kans when the wait is preserved', async () => {
+		vi.mocked(chooseDiscard).mockImplementation((seat: Seat, st: GameState) => {
+			const hand = st.players[seat].hand;
+			return hand[hand.length - 1];
+		});
+		const aiHand = [
+			...[1, 2, 3, 7, 8, 9, 20, 21, 22, 30].map((c, i) => tile(c, 50 + i)),
+			tile(14, 61),
+			tile(14, 62),
+			tile(14, 63)
+		];
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 3,
+			wallPos: 13,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3, { hand: aiHand, isRiichi: true, difficulty: 'good' })
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.players[3].melds.map((m) => m.type)).toEqual(['ankan']);
 	});
 });
