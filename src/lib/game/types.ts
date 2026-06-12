@@ -81,6 +81,11 @@ export interface GameState {
 
 	anyCallMadeThisRound: boolean; // pon/chi/kan made; cancels ippatsu + disqualifies chihou/tenhou
 	riichiBets: number; // count of 1000pt sticks on the table; awarded to the next winner
+	// A riichi declared this discard whose 1000-point stick hasn't been paid yet:
+	// the declaration completes (stick paid, riichiBets +1) only once the
+	// declaring discard survives every ron check. A ronned riichi discard means
+	// the riichi never completed and no stick is paid.
+	pendingRiichi: Seat | null;
 
 	players: [PlayerState, PlayerState, PlayerState, PlayerState];
 
