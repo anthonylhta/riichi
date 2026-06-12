@@ -49,6 +49,7 @@ function stateWith(p: PlayerState): GameState {
 		uraDoraIndicators: [t(34, 601)],
 		pendingKanDora: 0,
 		anyCallMadeThisRound: true,
+		pendingRiichi: null,
 		players: [
 			p,
 			player({ seat: 1 }),

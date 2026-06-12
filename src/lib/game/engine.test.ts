@@ -30,7 +30,7 @@ import {
 	humanClaimDaiminkan,
 	getPlayerKanOptions
 } from './engine';
-import { chooseDiscard, getShanten, riichiAnkanKeepsWaits } from './ai';
+import { chooseDiscard, getShanten, riichiAnkanKeepsWaits, shouldDeclareRiichi } from './ai';
 import { checkWin } from './scoring';
 import type { GameState, Meld, PlayerState, RoundResult, Seat } from './types';
 import type { GameTile } from './tiles';
@@ -80,6 +80,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		uraDoraIndicators: [tile(2, 101)],
 		pendingKanDora: 0,
 		anyCallMadeThisRound: false,
+		pendingRiichi: null,
 		players: [makePlayer(0), makePlayer(1), makePlayer(2), makePlayer(3)] as [
 			PlayerState,
 			PlayerState,
@@ -1439,5 +1440,166 @@ describe('kan dora timing — ankan flips now, minkan after the discard settles'
 		// unronned within the same turn — so it is revealed by the end.
 		expect(result.pendingKanDora).toBe(0);
 		expect(result.doraIndicators).toHaveLength(2);
+	});
+});
+
+// ─── riichi stick timing ─────────────────────────────────────────────────────
+
+describe('riichi stick — paid only when the declaring discard settles', () => {
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+	const WIN = { isWin: true, han: 2, fu: 30, score: 2000, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(0); // riichi legality needs tenpai
+		vi.mocked(checkWin).mockClear();
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+		vi.mocked(shouldDeclareRiichi).mockReturnValue(false);
+	});
+
+	const humanHand = Array.from({ length: 14 }, (_, i) => tile(i + 1, i + 1));
+
+	it('pays the stick once the riichi discard survives every ron check', async () => {
+		const state = makeState({
+			players: [
+				makePlayer(0, { hand: humanHand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 14, true);
+
+		expect(result.players[0].isRiichi).toBe(true);
+		expect(result.players[0].score).toBe(24000);
+		expect(result.riichiBets).toBe(1);
+		expect(result.pendingRiichi).toBeNull();
+	});
+
+	it('pays NO stick when the riichi discard is ronned', async () => {
+		// Seat 2 wins on anything once its marker hand is consulted.
+		vi.mocked(checkWin).mockImplementation(async (input: { handCodes: number[] }) =>
+			input.handCodes.includes(34) ? WIN : NO_WIN
+		);
+		const state = makeState({
+			players: [
+				makePlayer(0, { hand: humanHand }),
+				makePlayer(1),
+				makePlayer(2, { hand: [tile(34, 70)] }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 14, true);
+
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult?.winner).toBe(2);
+		// Declarer pays the ron, but not the 1000-point stick…
+		expect(result.players[0].score).toBe(23000); // 25000 − 2000, no stick
+		expect(result.riichiBets).toBe(0);
+		// …and the winner sweeps no stick either.
+		expect(result.players[2].score).toBe(27000); // 25000 + 2000 only
+	});
+
+	it('an AI riichi pays once its declaring discard settles', async () => {
+		vi.mocked(shouldDeclareRiichi).mockImplementation((seat: Seat) => seat === 1);
+		vi.mocked(chooseDiscard).mockImplementation((seat: Seat, st: GameState) => {
+			const hand = st.players[seat].hand;
+			return hand[hand.length - 1];
+		});
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 1,
+			players: [
+				makePlayer(0),
+				makePlayer(1, { hand: Array.from({ length: 13 }, (_, i) => tile(i + 1, 30 + i)) }),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.players[1].isRiichi).toBe(true);
+		expect(result.players[1].score).toBe(24000);
+		expect(result.riichiBets).toBe(1);
+		expect(result.pendingRiichi).toBeNull();
+	});
+
+	it('an AI riichi pays NO stick when its riichi tile is ronned', async () => {
+		vi.mocked(shouldDeclareRiichi).mockImplementation((seat: Seat) => seat === 1);
+		vi.mocked(chooseDiscard).mockImplementation((seat: Seat, st: GameState) => {
+			const hand = st.players[seat].hand;
+			return hand[hand.length - 1];
+		});
+		vi.mocked(checkWin).mockImplementation(async (input: { handCodes: number[] }) =>
+			input.handCodes.includes(34) ? WIN : NO_WIN
+		);
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 1,
+			players: [
+				makePlayer(0),
+				makePlayer(1, { hand: Array.from({ length: 13 }, (_, i) => tile(i + 1, 30 + i)) }),
+				makePlayer(2, { hand: [tile(34, 70)] }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult?.winner).toBe(2);
+		expect(result.players[1].score).toBe(23000); // ron payment only, no stick
+		expect(result.riichiBets).toBe(0);
+		expect(result.players[2].score).toBe(27000);
+	});
+
+	it('a call on the riichi discard still completes the riichi', () => {
+		// Seat 1 declared riichi; the human pons the riichi tile. The declaration
+		// completes (stick paid) — only a ron voids it.
+		vi.mocked(getShanten).mockReturnValue(8);
+		const state = makeState({
+			phase: 'claim_decision',
+			pendingRiichi: 1,
+			lastDiscard: tile(23, 99),
+			lastDiscardSeat: 1,
+			players: [
+				makePlayer(0, { hand: [tile(23, 1), tile(23, 2), tile(5, 3)] }),
+				makePlayer(1, { isRiichi: true }),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = humanClaimPon(state, [tile(23, 1), tile(23, 2)]);
+
+		expect(result.players[1].score).toBe(24000);
+		expect(result.riichiBets).toBe(1);
+		expect(result.pendingRiichi).toBeNull();
+	});
+
+	it('a passed claim on the riichi discard completes the riichi', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		const state = makeState({
+			phase: 'claim_decision',
+			pendingRiichi: 1,
+			lastDiscard: tile(5, 50),
+			lastDiscardSeat: 1,
+			pendingRon: null,
+			claimOptions: [],
+			players: [
+				makePlayer(0),
+				makePlayer(1, { isRiichi: true }),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanPassClaim(state);
+
+		expect(result.players[1].score).toBe(24000);
+		expect(result.riichiBets).toBe(1);
+		expect(result.pendingRiichi).toBeNull();
 	});
 });

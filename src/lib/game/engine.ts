@@ -119,6 +119,7 @@ function initRound(
 		pendingKanDora: 0,
 		anyCallMadeThisRound: false,
 		riichiBets,
+		pendingRiichi: null,
 		players,
 		lastDiscard: null,
 		lastDiscardSeat: null,
@@ -593,6 +594,23 @@ function revealPendingKanDora(state: GameState): GameState {
 	return s;
 }
 
+// Complete a pending riichi: the 1000-point stick is paid and joins the table
+// pool. The declaration's flags (isRiichi, ippatsu window, riichi tile) are set
+// at the discard; only the payment waits for the discard to survive every ron
+// check, so a ron on the riichi tile itself costs the declarer no stick.
+function settleRiichiStick(state: GameState): GameState {
+	if (state.pendingRiichi === null) return state;
+	const players = clonePlayers(state);
+	players[state.pendingRiichi].score -= 1000;
+	return { ...state, players, riichiBets: state.riichiBets + 1, pendingRiichi: null };
+}
+
+// Effects that wait for a discard to survive every ron check: deferred minkan
+// dora reveals (ADR 0049) and the riichi stick payment (ADR 0050).
+function settleDiscard(state: GameState): GameState {
+	return settleRiichiStick(revealPendingKanDora(state));
+}
+
 // `revealNow` — an ankan flips its new dora indicator immediately; a daiminkan
 // or kakan defers it (pendingKanDora) until the kan player's discard settles.
 function drawRinshan(state: GameState, seat: Seat, revealNow: boolean): GameState {
@@ -857,13 +875,14 @@ export async function humanDiscard(
 		players[0].isIppatsu = true;
 		players[0].isDoubleRiichi = player.discards.length === 0 && !state.anyCallMadeThisRound;
 		players[0].riichiTile = tile;
-		players[0].score -= 1000;
+		// The stick is NOT paid here — payment waits for the discard to survive
+		// the ron checks below (settleDiscard / the claim handlers).
 	}
 
 	const postDiscard: GameState = {
 		...state,
 		players,
-		riichiBets: willDeclareRiichi ? state.riichiBets + 1 : state.riichiBets,
+		pendingRiichi: willDeclareRiichi ? 0 : state.pendingRiichi,
 		lastDiscard: tile,
 		lastDiscardSeat: 0,
 		phase: 'ai_turn',
@@ -888,8 +907,9 @@ export async function humanDiscard(
 		if (ron) return applyRoundResult(newState, ron);
 	}
 
-	// The discard survived every ron check — flip any deferred minkan dora.
-	return applyAiCalls(revealPendingKanDora(newState), tile, 0);
+	// The discard survived every ron check — flip any deferred minkan dora and
+	// complete a pending riichi.
+	return applyAiCalls(settleDiscard(newState), tile, 0);
 }
 
 export async function humanDeclareTsumo(state: GameState): Promise<GameState> {
@@ -916,8 +936,9 @@ function applyCall(state: GameState, players: ReturnType<typeof clonePlayers>): 
 export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameState {
 	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
 	const calledTile = state.lastDiscard;
-	// Claiming the discard means it wasn't ronned — flip any deferred minkan dora.
-	state = revealPendingKanDora(state);
+	// Claiming the discard means it wasn't ronned — flip any deferred minkan
+	// dora and complete a pending riichi.
+	state = settleDiscard(state);
 	const player = state.players[0];
 
 	const meld: Meld = {
@@ -946,8 +967,9 @@ export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameStat
 export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameState {
 	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
 	const calledTile = state.lastDiscard;
-	// Claiming the discard means it wasn't ronned — flip any deferred minkan dora.
-	state = revealPendingKanDora(state);
+	// Claiming the discard means it wasn't ronned — flip any deferred minkan
+	// dora and complete a pending riichi.
+	state = settleDiscard(state);
 	const player = state.players[0];
 
 	const meld: Meld = {
@@ -1050,8 +1072,8 @@ export async function humanClaimDaiminkan(
 	if (!canKan(state)) return state;
 	const calledTile = state.lastDiscard;
 	// Claiming the discard means it wasn't ronned — flip any deferred minkan
-	// dora before this kan defers its own.
-	state = revealPendingKanDora(state);
+	// dora (before this kan defers its own) and complete a pending riichi.
+	state = settleDiscard(state);
 
 	const player = state.players[0];
 
@@ -1125,8 +1147,9 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 		if (ron) return applyRoundResult(cleared, ron);
 	}
 
-	// The discard survived every ron check — flip any deferred minkan dora.
-	const settled = revealPendingKanDora(cleared);
+	// The discard survived every ron check — flip any deferred minkan dora and
+	// complete a pending riichi.
+	const settled = settleDiscard(cleared);
 
 	const afterAiCalls = await applyAiCalls(settled, discardTile, discarderSeat);
 	if (afterAiCalls !== settled) return afterAiCalls;
@@ -1243,8 +1266,9 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		players[seat].isRiichi = true;
 		players[seat].isIppatsu = true;
 		players[seat].isDoubleRiichi = s.players[seat].discards.length === 0 && !s.anyCallMadeThisRound;
-		players[seat].score -= 1000;
-		s = { ...s, players, riichiBets: s.riichiBets + 1 };
+		// The stick is NOT paid here — payment waits for the declaring discard
+		// to survive the ron checks below (settleDiscard / the claim handlers).
+		s = { ...s, players, pendingRiichi: seat };
 	}
 
 	const discardTile = chooseDiscard(seat, s, declaringRiichi);
@@ -1292,10 +1316,10 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		if (ron) return applyRoundResult(s, ron);
 	}
 
-	// The discard survived every ron check — flip any deferred minkan dora. (In
-	// the claim_decision path above the human can still ron, so the flip waits
-	// for humanPassClaim / a claim handler instead.)
-	s = revealPendingKanDora(s);
+	// The discard survived every ron check — flip any deferred minkan dora and
+	// complete a pending riichi. (In the claim_decision path above the human can
+	// still ron, so settling waits for humanPassClaim / a claim handler instead.)
+	s = settleDiscard(s);
 
 	// Check AI pon/chi/daiminkan
 	const afterAiCalls = await applyAiCalls(s, discardTile, seat);
