@@ -4,10 +4,6 @@
 // (no knowledge of this engine needed to read it) and it's the input format for
 // ecosystem tools like the Mortal reviewer. We emit a full-information log
 // (every seat's tiles visible), the same as Tenhou→MJAI conversions.
-//
-// The log reflects the game as our engine played it, including its known rule
-// deviations (e.g. the riichi stick is paid even when the riichi tile is
-// ronned, so reach_accepted is emitted before that hora).
 
 import type { GameTile } from './tiles';
 import type { GameEvent } from './events';
@@ -40,9 +36,11 @@ export function toMjaiEvents(events: GameEvent[], names: string[] = DEFAULT_NAME
 	// the hand, never tsumogiri).
 	const lastDrawn: (GameTile | null)[] = [null, null, null, null];
 
-	// A riichi discard whose reach_accepted hasn't been emitted yet. Our engine
-	// pays the stick at declaration unconditionally, so acceptance is emitted
-	// before whatever happens next (even a ron on the riichi tile).
+	// A riichi discard whose reach_accepted hasn't been emitted yet. Acceptance
+	// (the stick payment) happens once the declaring discard survives every ron
+	// check — so it is flushed by the next draw/call, and dropped on a win (a
+	// reach still pending at a hora means the riichi tile itself was ronned and
+	// the declaration never completed).
 	let pendingReach: Seat | null = null;
 	const flushReach = () => {
 		if (pendingReach !== null) {
@@ -126,7 +124,9 @@ export function toMjaiEvents(events: GameEvent[], names: string[] = DEFAULT_NAME
 				break;
 			}
 			case 'win': {
-				flushReach();
+				// A reach still pending here was never accepted (the riichi discard
+				// itself was ronned) — drop it rather than flush it.
+				pendingReach = null;
 				out.push({
 					type: 'hora',
 					actor: ev.seat,

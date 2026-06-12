@@ -7,10 +7,9 @@
 // record. Exports (MJAI, a human-readable move list, an in-UI viewer) all read
 // this stream rather than re-interpreting engine states.
 //
-// Events reflect what the engine actually did — including its known rule
-// deviations (e.g. the riichi stick is paid even when the riichi tile is
-// ronned). The export must stay honest to the game as played, not to the
-// rulebook.
+// Events reflect what the engine actually did — should the engine ever deviate
+// from the rulebook, the export must stay honest to the game as played, not to
+// the rulebook.
 
 import type { GameTile } from './tiles';
 import type { Seat } from './types';
@@ -32,7 +31,9 @@ export type GameEvent =
 			scores: Scores;
 	  }
 	| { type: 'draw'; seat: Seat; tile: GameTile; rinshan: boolean }
-	// `riichi` marks the riichi-declaring discard (stick paid, hand locks).
+	// `riichi` marks the riichi-declaring discard (the hand locks; the stick is
+	// paid only once the discard survives every ron check — a ronned riichi
+	// tile means the declaration never completed and no stick was paid).
 	| { type: 'discard'; seat: Seat; tile: GameTile; riichi: boolean }
 	| {
 			type: 'call';

@@ -145,12 +145,18 @@ describe('MJAI export of a real game', () => {
 			// The riichi declaration is immediately followed by that seat's dahai.
 			expect(lines[reachIdx + 1].type).toBe('dahai');
 			expect(lines[reachIdx + 1].actor).toBe(actor);
-			// And a reach_accepted for the same seat follows before its next draw.
 			const after = lines.slice(reachIdx + 2);
 			const accepted = after.findIndex((l) => l.type === 'reach_accepted' && l.actor === actor);
-			const nextDraw = after.findIndex((l) => l.type === 'tsumo' && l.actor === actor);
-			expect(accepted).toBeGreaterThanOrEqual(0);
-			if (nextDraw !== -1) expect(accepted).toBeLessThan(nextDraw);
+			if (after[0]?.type === 'hora') {
+				// The riichi tile itself was ronned — the declaration never
+				// completed, so no reach_accepted (and no stick was paid).
+				expect(accepted).toBe(-1);
+			} else {
+				// Otherwise a reach_accepted for the seat follows before its next draw.
+				const nextDraw = after.findIndex((l) => l.type === 'tsumo' && l.actor === actor);
+				expect(accepted).toBeGreaterThanOrEqual(0);
+				if (nextDraw !== -1) expect(accepted).toBeLessThan(nextDraw);
+			}
 
 			// Post-riichi discards by that seat are tsumogiri until the hand ends.
 			const kyokuEnd = after.findIndex((l) => l.type === 'end_kyoku');
@@ -162,4 +168,56 @@ describe('MJAI export of a real game', () => {
 		}
 		throw new Error('no riichi occurred across 6 games — investigate, this should be near-certain');
 	}, 120000);
+});
+
+describe('reach_accepted vs a ron on the riichi tile', () => {
+	const baseStart = {
+		type: 'round_start' as const,
+		round: 1,
+		honba: 0,
+		riichiBets: 0,
+		dealer: 0 as const,
+		doraIndicator: tile(1, 1),
+		hands: [[], [], [], []] as [
+			ReturnType<typeof tile>[],
+			ReturnType<typeof tile>[],
+			ReturnType<typeof tile>[],
+			ReturnType<typeof tile>[]
+		],
+		scores: [25000, 25000, 25000, 25000] as [number, number, number, number]
+	};
+
+	it('emits reach_accepted once play continues past the riichi discard', () => {
+		const lines = toMjaiEvents([
+			baseStart,
+			{ type: 'discard', seat: 0, tile: tile(5, 10), riichi: true },
+			{ type: 'draw', seat: 1, tile: tile(6, 11), rinshan: false }
+		]);
+		const types = lines.map((l) => l.type);
+		expect(types).toContain('reach_accepted');
+		expect(types.indexOf('reach_accepted')).toBeLessThan(types.indexOf('tsumo'));
+	});
+
+	it('emits NO reach_accepted when the riichi discard is ronned', () => {
+		const lines = toMjaiEvents([
+			baseStart,
+			{ type: 'discard', seat: 0, tile: tile(5, 10), riichi: true },
+			{
+				type: 'win',
+				seat: 2,
+				from: 0,
+				tile: tile(5, 10),
+				han: 2,
+				fu: 30,
+				score: 2000,
+				yaku: [],
+				deltas: [-2000, 0, 2000, 0],
+				uraIndicators: []
+			}
+		]);
+		const types = lines.map((l) => l.type);
+		expect(types).toContain('reach');
+		expect(types).toContain('hora');
+		expect(types).not.toContain('reach_accepted');
+	});
 });
