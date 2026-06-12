@@ -513,6 +513,15 @@ function getDaiminkanOption(hand: GameTile[], calledTile: GameTile): ClaimOption
 	return null;
 }
 
+// No kan of any kind when the live wall is empty — the dead wall replenishes
+// from the live wall's tail (ADR 0042), so there must be a tile left to claim
+// (and a rinshan draw with wallEnd already at wallPos would go negative). The
+// rinshan check makes a 5th kan simply never offered, rather than tripping
+// drawRinshan's rinshankPos >= 4 exhaustive-draw fallback.
+function canKan(state: GameState): boolean {
+	return state.wallEnd - state.wallPos >= 1 && state.rinshankPos < 4;
+}
+
 function getAnkanOptions(player: PlayerState): TileCode[] {
 	const counts = new Map<TileCode, number>();
 	for (const t of player.hand) {
@@ -612,7 +621,7 @@ export function getHumanClaimOptions(
 	const hand = state.players[0].hand;
 	const options: ClaimOption[] = [];
 
-	const kan = getDaiminkanOption(hand, discardTile);
+	const kan = canKan(state) ? getDaiminkanOption(hand, discardTile) : null;
 	if (kan) options.push(kan);
 
 	const pon = getPonOption(hand, discardTile);
@@ -701,7 +710,7 @@ async function applyAiCalls(
 		const player = state.players[seat];
 		if (player.isHuman || player.isRiichi) continue;
 
-		const daiminkanTiles = aiDaiminkanHandTiles(player.hand, discardTile);
+		const daiminkanTiles = canKan(state) ? aiDaiminkanHandTiles(player.hand, discardTile) : null;
 		if (daiminkanTiles && callKeepsLegalHand(player.hand.length, 3, true)) {
 			const meld: Meld = {
 				type: 'daiminkan',
@@ -947,6 +956,7 @@ export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameStat
 
 export async function humanDeclareAnkan(state: GameState, code: TileCode): Promise<GameState> {
 	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return state;
+	if (!canKan(state)) return state;
 
 	const player = state.players[0];
 	// Validate through the same gate that offers the kan — in riichi this also
@@ -975,6 +985,7 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 
 export async function humanDeclareKakan(state: GameState, meldIndex: number): Promise<GameState> {
 	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return state;
+	if (!canKan(state)) return state;
 
 	const player = state.players[0];
 	const meld = player.melds[meldIndex];
@@ -1017,6 +1028,7 @@ export async function humanClaimDaiminkan(
 	handTiles: GameTile[]
 ): Promise<GameState> {
 	if (state.phase !== 'claim_decision' || !state.lastDiscard) return state;
+	if (!canKan(state)) return state;
 
 	const calledTile = state.lastDiscard;
 	const player = state.players[0];
@@ -1049,6 +1061,7 @@ export function getPlayerKanOptions(state: GameState): {
 	ankan: TileCode[];
 	kakan: { meldIndex: number; code: TileCode }[];
 } {
+	if (!canKan(state)) return { ankan: [], kakan: [] };
 	const player = state.players[0];
 	return {
 		ankan: getAnkanOptions(player),
@@ -1134,7 +1147,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 
 	// Good AI declares kan when possible (normal turns only)
 	if (!isPostCall && s.players[seat].difficulty === 'good') {
-		const ankanCodes = getAnkanOptions(s.players[seat]);
+		const ankanCodes = canKan(s) ? getAnkanOptions(s.players[seat]) : [];
 		if (ankanCodes.length > 0 && callKeepsLegalHand(s.players[seat].hand.length, 4, true)) {
 			const code = ankanCodes[0];
 			const aiPlayer = s.players[seat];
@@ -1156,7 +1169,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 			if (kanTsumo) return applyRoundResult(s, kanTsumo);
 		}
 
-		const kakanOpts = getKakanOptions(s.players[seat]);
+		const kakanOpts = canKan(s) ? getKakanOptions(s.players[seat]) : [];
 		if (kakanOpts.length > 0 && callKeepsLegalHand(s.players[seat].hand.length, 1, true)) {
 			const { meldIndex, code } = kakanOpts[0];
 			const aiPlayer = s.players[seat];
