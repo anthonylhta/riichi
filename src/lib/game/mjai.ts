@@ -23,7 +23,8 @@ export function tileToMjai(t: GameTile): string {
 }
 
 // Seat 3 is the 'good' AI, 1–2 are 'basic' (engine.ts makePlayer).
-const DEFAULT_NAMES = ['You', 'AI (basic)', 'AI (basic)', 'AI (good)'];
+// Shared with the tenhou.net/6 exporter (tenhou6.ts).
+export const DEFAULT_NAMES = ['You', 'AI (basic)', 'AI (basic)', 'AI (good)'];
 
 export type MjaiEvent = Record<string, unknown>;
 

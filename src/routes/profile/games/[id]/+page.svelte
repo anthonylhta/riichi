@@ -5,37 +5,50 @@
 
 	let { data } = $props();
 
-	// MJAI export: fetch the stored ReplayLog, re-run it through the engine in
-	// the browser (the engine + WASM are dynamic-imported so this page stays
+	// Game-log exports: fetch the stored ReplayLog, re-run it through the engine
+	// in the browser (the engine + WASM are dynamic-imported so this page stays
 	// light), and download the derived event log. The replay IS the game —
-	// every AI move is re-derived, so the export covers all four seats.
-	let mjaiBusy = $state(false);
-	let mjaiError = $state('');
-	async function downloadMjai(gameId: number) {
-		if (mjaiBusy) return;
-		mjaiBusy = true;
-		mjaiError = '';
+	// every AI move is re-derived, so the exports cover all four seats.
+	// Two formats from the same event stream: MJAI (the universal, LLM-readable
+	// record) and tenhou.net/6 (the Mortal review site's custom-log input).
+	let exportBusy = $state<'mjai' | 'tenhou6' | null>(null);
+	let exportError = $state('');
+	async function downloadLog(gameId: number, kind: 'mjai' | 'tenhou6') {
+		if (exportBusy) return;
+		exportBusy = kind;
+		exportError = '';
 		try {
-			const [res, { replayGame }, { toMjaiJsonl }] = await Promise.all([
+			const [res, { replayGame }] = await Promise.all([
 				fetch(`/api/games/${gameId}/replay`),
-				import('$lib/game/replay'),
-				import('$lib/game/mjai')
+				import('$lib/game/replay')
 			]);
 			if (!res.ok) throw new Error(`replay fetch failed (${res.status})`);
 			const log = await res.json();
 			const { final } = await replayGame(log);
-			const blob = new Blob([toMjaiJsonl(final.events)], { type: 'application/jsonl' });
+			const [body, filename, mime] =
+				kind === 'mjai'
+					? [
+							(await import('$lib/game/mjai')).toMjaiJsonl(final.events),
+							`riichi-game-${gameId}.mjai.jsonl`,
+							'application/jsonl'
+						]
+					: [
+							(await import('$lib/game/tenhou6')).toTenhou6Json(final.events),
+							`riichi-game-${gameId}.tenhou6.json`,
+							'application/json'
+						];
+			const blob = new Blob([body], { type: mime });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `riichi-game-${gameId}.mjai.jsonl`;
+			a.download = filename;
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			console.error('MJAI export failed', e);
-			mjaiError = 'Export failed — the replay could not be re-run.';
+			console.error(`${kind} export failed`, e);
+			exportError = 'Export failed — the replay could not be re-run.';
 		} finally {
-			mjaiBusy = false;
+			exportBusy = null;
 		}
 	}
 
@@ -87,18 +100,26 @@
 
 		{#if g.hasReplay}
 			<p class="export">
-				<a class="export-link" href="/api/games/{g.id}/replay" download>
-					⤓ Download replay (JSON)
-				</a>
-				<span class="export-sub">full move log — every wall and input of this game</span>
+				<button
+					class="export-link"
+					onclick={() => downloadLog(g.id, 'mjai')}
+					disabled={exportBusy !== null}
+				>
+					{exportBusy === 'mjai' ? 'Rebuilding game…' : '⤓ Download game log (MJAI)'}
+				</button>
+				<span class="export-sub">the universal record — readable by tools and LLMs anywhere</span>
 			</p>
 			<p class="export">
-				<button class="export-link" onclick={() => downloadMjai(g.id)} disabled={mjaiBusy}>
-					{mjaiBusy ? 'Rebuilding game…' : '⤓ Download game log (MJAI)'}
+				<button
+					class="export-link"
+					onclick={() => downloadLog(g.id, 'tenhou6')}
+					disabled={exportBusy !== null}
+				>
+					{exportBusy === 'tenhou6' ? 'Rebuilding game…' : '⤓ Download game log (tenhou.net/6)'}
 				</button>
 				<span class="export-sub">
-					{#if mjaiError}{mjaiError}{:else}standard format — readable anywhere, works with reviewers
-						like Mortal{/if}
+					{#if exportError}{exportError}{:else}for Mortal reviews — paste into mjai.ekyu.moe as a
+						custom log (you are seat 0){/if}
 				</span>
 			</p>
 		{/if}
@@ -253,8 +274,8 @@
 	.export-link:hover {
 		color: #e8e0d5;
 	}
-	/* The MJAI export is a button (it rebuilds the game client-side), styled
-	   to sit flush with the replay download link above it. */
+	/* The exports are buttons (they rebuild the game client-side), styled as
+	   quiet links. */
 	button.export-link {
 		background: none;
 		border: none;
