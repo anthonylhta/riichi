@@ -1603,3 +1603,57 @@ describe('riichi stick — paid only when the declaring discard settles', () => 
 		expect(result.pendingRiichi).toBeNull();
 	});
 });
+
+// ─── AI ippatsu window ───────────────────────────────────────────────────────
+
+describe('AI riichi — the ippatsu window survives the declaring discard', () => {
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+		vi.mocked(shouldDeclareRiichi).mockReturnValue(false);
+		vi.mocked(chooseDiscard).mockImplementation((seat: Seat, st: GameState) => {
+			const hand = st.players[seat].hand;
+			return hand[hand.length - 1];
+		});
+	});
+
+	const aiHand = () => Array.from({ length: 13 }, (_, i) => tile(i + 1, 30 + i));
+
+	it('stays open after the declaring discard', async () => {
+		vi.mocked(shouldDeclareRiichi).mockImplementation((seat: Seat) => seat === 1);
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 1,
+			players: [
+				makePlayer(0),
+				makePlayer(1, { hand: aiHand() }),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.players[1].isRiichi).toBe(true);
+		expect(result.players[1].isIppatsu).toBe(true);
+	});
+
+	it('closes on the next (tsumogiri) discard as before', async () => {
+		const state = makeState({
+			phase: 'ai_turn',
+			currentSeat: 1,
+			players: [
+				makePlayer(0),
+				makePlayer(1, { hand: aiHand(), isRiichi: true, isIppatsu: true }),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await runAiTurn(state);
+
+		expect(result.players[1].isIppatsu).toBe(false);
+	});
+});

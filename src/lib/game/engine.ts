@@ -1275,8 +1275,11 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	const players = clonePlayers(s);
 	players[seat].hand = sortHand(s.players[seat].hand.filter((t) => t.id !== discardTile.id));
 	players[seat].discards = [...s.players[seat].discards, discardTile];
-	// Post-riichi discard clears this AI player's ippatsu window
-	if (s.players[seat].isRiichi && s.players[seat].isIppatsu) {
+	// Post-riichi discard closes this AI player's ippatsu window — but never on
+	// the declaring discard itself: isRiichi is already true by this point (the
+	// flags are set just above), and the window is supposed to OPEN here. The
+	// human path gets this for free by checking the pre-discard player state.
+	if (!declaringRiichi && s.players[seat].isRiichi && s.players[seat].isIppatsu) {
 		players[seat].isIppatsu = false;
 	}
 
