@@ -271,7 +271,8 @@ describe('tenhou.net/6 export of a real game', () => {
 		const out = toTenhou6(live.events);
 
 		expect(out.name).toHaveLength(4);
-		expect(out.rule.disp).toBe('East');
+		// Hanchan label on purpose — Mortal hard-rejects tonpuusen (ADR 0052).
+		expect(out.rule.disp).toBe('South');
 		expect(out.log.length).toBeGreaterThan(0);
 
 		for (const raw of out.log) {
