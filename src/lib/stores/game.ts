@@ -15,7 +15,13 @@ import {
 	humanClaimDaiminkan
 } from '$lib/game/engine';
 import { settle } from '$lib/game/autoplay';
-import { newReplayLog, wallFromState, type ReplayInput, type ReplayLog } from '$lib/game/replay';
+import {
+	newReplayLog,
+	replayGame,
+	wallFromState,
+	type ReplayInput,
+	type ReplayLog
+} from '$lib/game/replay';
 import type { TileCode } from '$lib/game/tiles';
 import { recordRound, type RoundRecord } from '$lib/game/review';
 
@@ -30,14 +36,27 @@ const AI_TURN_DELAY_MS = 500;
 // ── Replay capture ──────────────────────────────────────────────────────────
 // Record each round's wall + every human input so a game (a freeze included) can
 // be reproduced via replayGame(). Mirrored to localStorage after every change so
-// a stuck game survives a reload and can be exported for debugging.
+// a stuck game survives a reload and can be exported for debugging — and, since
+// the mirror carries a status, an interrupted game can be RESUMED: 'live' means
+// unfinished (offer to pick it up on the next /game visit), 'done' means it
+// finished or the player knowingly abandoned it.
 const REPLAY_KEY = 'riichi:lastReplay';
 let replayLog: ReplayLog = newReplayLog();
+let replayStatus: 'live' | 'done' = 'live';
+
+// What sits under REPLAY_KEY. (Pre-resume mirrors stored the bare ReplayLog;
+// those are unreadable as a wrapper and so are simply never offered for resume.)
+interface ReplayMirror {
+	v: 1;
+	status: 'live' | 'done';
+	log: ReplayLog;
+}
 
 function mirrorReplay() {
 	if (typeof localStorage === 'undefined') return;
 	try {
-		localStorage.setItem(REPLAY_KEY, JSON.stringify(replayLog));
+		const mirror: ReplayMirror = { v: 1, status: replayStatus, log: replayLog };
+		localStorage.setItem(REPLAY_KEY, JSON.stringify(mirror));
 	} catch {
 		// Quota / serialization issues shouldn't break gameplay.
 	}
@@ -72,6 +91,7 @@ export async function startGame() {
 	try {
 		gameLog.set([]);
 		replayLog = newReplayLog();
+		replayStatus = 'live';
 		const initial = initGame();
 		replayLog.startWall = wallFromState(initial);
 		mirrorReplay();
@@ -79,6 +99,67 @@ export async function startGame() {
 	} catch (e) {
 		gameError.set(String(e));
 		console.error('startGame failed:', e);
+	} finally {
+		gameLoading.set(false);
+	}
+}
+
+// ── Resume an interrupted game ──────────────────────────────────────────────
+
+// The mirrored log of an unfinished game, if one exists — the offer shown on
+// /game mount. Only a 'live' wrapper with a dealt wall qualifies; anything
+// else (no mirror, finished/abandoned, pre-wrapper legacy shape, corruption)
+// means a fresh deal.
+export function loadResumableReplay(): ReplayLog | null {
+	if (typeof localStorage === 'undefined') return null;
+	try {
+		const raw = localStorage.getItem(REPLAY_KEY);
+		if (!raw) return null;
+		const mirror = JSON.parse(raw) as Partial<ReplayMirror>;
+		if (mirror?.v !== 1 || mirror.status !== 'live') return null;
+		const log = mirror.log;
+		if (!log || log.version !== 1 || !log.startWall || !Array.isArray(log.inputs)) return null;
+		return log;
+	} catch {
+		return null;
+	}
+}
+
+// Mark the current game knowingly abandoned (the exit panel's "Leave") so it
+// is not offered for resume later.
+export function abandonGame() {
+	replayStatus = 'done';
+	mirrorReplay();
+}
+
+// Re-derive the interrupted game from its log (same engine, no delays) and
+// continue from the exact state. Also rebuilds the per-round review log: a
+// round finishes right before each nextRound input, and replayGame's states[k]
+// is the state BEFORE input k.
+export async function resumeGame(log: ReplayLog) {
+	gameLoading.set(true);
+	gameError.set(null);
+	try {
+		const { states, final } = await replayGame(log);
+		const rounds: RoundRecord[] = [];
+		log.inputs.forEach((input, k) => {
+			if (input.t === 'nextRound') {
+				const r = recordRound(states[k]);
+				if (r) rounds.push(r);
+			}
+		});
+		gameLog.set(rounds);
+		replayLog = log;
+		// A mirror can be 'live' yet replay to game_end (e.g. the tab closed
+		// before the finished status was written). Mark it done WITHOUT saving:
+		// the original session already fired its save attempt.
+		replayStatus = final.phase === 'game_end' ? 'done' : 'live';
+		mirrorReplay();
+		gameState.set(final);
+	} catch (e) {
+		// A stale or corrupt mirror must never trap the player — deal fresh.
+		console.error('resumeGame failed, dealing a fresh game:', e);
+		await startGame();
 	} finally {
 		gameLoading.set(false);
 	}
@@ -213,9 +294,14 @@ export async function nextRound() {
 		// replay re-deals the same hand.
 		recordInput({ t: 'nextRound', wall: next.phase === 'game_end' ? null : wallFromState(next) });
 		await settleTurns(next);
-		// The game just ended — persist it (signed-in only; the endpoint no-ops
-		// for anonymous play). Fire-and-forget so the overlay isn't blocked.
-		if (next.phase === 'game_end') void saveFinishedGame(next, log);
+		// The game just ended — mark the mirror finished (no resume offer) and
+		// persist it (signed-in only; the endpoint no-ops for anonymous play).
+		// Fire-and-forget so the overlay isn't blocked.
+		if (next.phase === 'game_end') {
+			replayStatus = 'done';
+			mirrorReplay();
+			void saveFinishedGame(next, log);
+		}
 	} catch (e) {
 		console.error('nextRound failed:', e);
 	} finally {
