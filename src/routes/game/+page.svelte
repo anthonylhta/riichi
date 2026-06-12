@@ -25,6 +25,7 @@
 	import { buildReviewPayload, type RoundRecord } from '$lib/game/review';
 	import { buildHelperView, type HelperAdvice } from '$lib/game/helper';
 	import Tile from '$lib/components/Tile.svelte';
+	import { Show, SignInButton } from 'svelte-clerk';
 
 	// Post-game overview (Claude) — generated on demand from the flagged moments.
 	interface Overview {
@@ -582,6 +583,15 @@
 						</button>
 					{/if}
 
+					<!-- Conversion nudge: games only save for signed-in players (ADR 0039).
+					     Future tense on purpose — this finished game can no longer be saved. -->
+					<Show when="signed-out">
+						<p class="signin-nudge">
+							<SignInButton mode="modal" class="nudge-signin">Sign in</SignInButton>
+							<span>to save your games and track your stats.</span>
+						</p>
+					</Show>
+
 					<div class="end-actions">
 						<button class="action-btn menu-action" onclick={() => goto('/')}>Menu</button>
 						<button class="action-btn" onclick={startGame}>New Game</button>
@@ -1137,6 +1147,27 @@
 
 	.action-btn:hover {
 		background: #a01830;
+	}
+
+	/* Game-end overlay: conversion nudge for anonymous players, above the actions.
+	   The SignInButton renders a real <button>; styled as an inline crimson link. */
+	.signin-nudge {
+		margin: 0.8rem 0 0;
+		font-size: 0.82rem;
+		color: #9a9286;
+		letter-spacing: 0.03em;
+	}
+	:global(.signin-nudge .nudge-signin) {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		font-weight: 600;
+		color: #c41e3a;
+		cursor: pointer;
+	}
+	:global(.signin-nudge .nudge-signin:hover) {
+		color: #e8e0d5;
 	}
 
 	/* Game-end overlay: Menu (secondary) beside New Game (primary). */
