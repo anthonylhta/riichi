@@ -1,4 +1,4 @@
-import type { GameTile } from './tiles';
+import type { GameTile, TileCode } from './tiles';
 import type { GameEvent } from './events';
 
 export type Seat = 0 | 1 | 2 | 3;
@@ -29,6 +29,17 @@ export interface PlayerState {
 	riichiTile: GameTile | null;
 	isFuriten: boolean; // own-discard furiten — any wait tile appears in own discards
 	isTempFuriten: boolean; // passed on a ron opportunity; clears after next discard (unless in riichi)
+	// Tile codes this seat may NOT discard on the turn right after a chi/pon
+	// (kuikae / swap-call ban): the called tile itself, plus the suji other-end
+	// after a chi. Set when the call is made, cleared on the next discard.
+	kuikaeForbidden: TileCode[];
+	// True once any of this seat's discards has been claimed (pon/chi/kan) by
+	// another seat — disqualifies the seat from nagashi mangan at exhaustive draw.
+	anyDiscardCalled: boolean;
+	// Pao (sekinin barai): the seat that fed this player the completing call of a
+	// daisangen (3rd dragon) or daisuushii (4th wind), making that feeder liable
+	// for the yakuman. null when no pao liability is attached.
+	paoSeat: Seat | null;
 }
 
 export type GamePhase =
@@ -50,9 +61,25 @@ export interface RoundResult {
 	pointChanges: [number, number, number, number];
 }
 
+// Abortive-draw reasons (ryuukyoku that void the hand without scoring). All of
+// them: dealer keeps the deal, honba +1, riichi sticks carry over.
+// - 'kyuushu'      — kyuushu kyuuhai: a player with 9+ distinct terminals/honors
+//                    aborts on their first uninterrupted draw (player's choice).
+// - 'suufon'       — suufon renda: all four discard the same wind on the
+//                    uninterrupted first go-around.
+// - 'suucha-riichi'— four players have declared riichi.
+// - 'suukaikan'    — four kans declared across two or more players.
+// - 'sanchahou'    — three players ron the same discard (triple ron).
+export type AbortReason = 'kyuushu' | 'suufon' | 'suucha-riichi' | 'suukaikan' | 'sanchahou';
+
 export interface ExhaustiveDrawResult {
 	tenpaiSeats: Seat[];
 	pointChanges: [number, number, number, number];
+	// Seats that achieved nagashi mangan (all discards terminals/honors, none
+	// called). When non-empty, pointChanges holds the nagashi payments instead of
+	// the ordinary tenpai/noten exchange, and each such seat keeps/forces a deal
+	// as in continueGame.
+	nagashiSeats: Seat[];
 }
 
 export interface GameState {
@@ -97,7 +124,16 @@ export interface GameState {
 	claimOptions: ClaimOption[] | null; // pon/chi options during claim_decision
 
 	roundResult: RoundResult | null;
+	// Additional ron winners on a double ron (MJ Soul pays both). `roundResult`
+	// holds the primary winner — the one nearest the discarder in turn order, who
+	// also collects the riichi sticks + honba; `extraRons` holds the other(s).
+	// Empty on every ordinary single-winner result. (Triple ron aborts instead.)
+	extraRons: RoundResult[];
 	exhaustiveDrawResult: ExhaustiveDrawResult | null;
+	// Non-null when the round ended as an abortive draw (see AbortReason). The
+	// hand is voided: no scoring, dealer keeps, honba +1, sticks carry. A zeroed
+	// exhaustiveDrawResult is also set so the round-end draw overlay still renders.
+	abortiveDraw: AbortReason | null;
 
 	// Append-only record of every observable action this game (all seats, all
 	// rounds — carried across initRound). See events.ts; consumed by mjai.ts.

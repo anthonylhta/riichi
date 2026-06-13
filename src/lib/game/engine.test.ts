@@ -28,7 +28,12 @@ import {
 	humanDeclareKakan,
 	humanDeclareAnkan,
 	humanClaimDaiminkan,
-	getPlayerKanOptions
+	getPlayerKanOptions,
+	kuikaeForbiddenCodes,
+	canDeclareKyuushu,
+	humanDeclareKyuushu,
+	checkTsumo,
+	checkRon
 } from './engine';
 import { chooseDiscard, getShanten, riichiAnkanKeepsWaits, shouldDeclareRiichi } from './ai';
 import { checkWin } from './scoring';
@@ -56,6 +61,9 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 		riichiTile: null,
 		isFuriten: false,
 		isTempFuriten: false,
+		kuikaeForbidden: [],
+		anyDiscardCalled: false,
+		paoSeat: null,
 		...overrides
 	};
 }
@@ -93,7 +101,9 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
+		extraRons: [],
 		exhaustiveDrawResult: null,
+		abortiveDraw: null,
 		events: [],
 		...overrides
 	};
@@ -548,7 +558,7 @@ describe('continueGame — exhaustive draw renchan', () => {
 			honba: 0,
 			dealer,
 			roundResult: null,
-			exhaustiveDrawResult: { tenpaiSeats, pointChanges: [0, 0, 0, 0] },
+			exhaustiveDrawResult: { tenpaiSeats, pointChanges: [0, 0, 0, 0], nagashiSeats: [] },
 			...overrides
 		});
 
@@ -835,7 +845,7 @@ describe('continueGame — leftover riichi sticks go to 1st place', () => {
 			round,
 			dealer: 3,
 			roundResult: null,
-			exhaustiveDrawResult: { tenpaiSeats: [], pointChanges: [0, 0, 0, 0] },
+			exhaustiveDrawResult: { tenpaiSeats: [], pointChanges: [0, 0, 0, 0], nagashiSeats: [] },
 			riichiBets,
 			players: scores.map((s, i) => makePlayer(i, { score: s })) as GameState['players']
 		});
@@ -1755,5 +1765,671 @@ describe('runAiTurn — a kan meld does not make later turns look post-call', ()
 
 		expect(result.wallPos).toBe(state.wallPos);
 		expect(result.players[1].hand).toHaveLength(10);
+	});
+});
+
+// ─── kuikae (swap-call ban) ──────────────────────────────────────────────────
+
+describe('kuikaeForbiddenCodes', () => {
+	it('pon forbids only the called tile (genbutsu)', () => {
+		expect(kuikaeForbiddenCodes('pon', 5, [5, 5])).toEqual([5]);
+	});
+
+	it('chi calling the low end forbids the called tile + suji high+1', () => {
+		// hand 3,4 + called 2 → run 2-3-4; can't discard 2 (genbutsu) or 5 (suji)
+		expect(kuikaeForbiddenCodes('chi', 2, [3, 4]).sort((a, b) => a - b)).toEqual([2, 5]);
+	});
+
+	it('chi calling the high end forbids the called tile + suji low-1', () => {
+		// hand 3,4 + called 5 → run 3-4-5; can't discard 5 or 2
+		expect(kuikaeForbiddenCodes('chi', 5, [3, 4]).sort((a, b) => a - b)).toEqual([2, 5]);
+	});
+
+	it('chi of a kanchan middle forbids only the called tile (no suji)', () => {
+		// hand 4,6 + called 5 → run 4-5-6, kanchan; only 5 is genbutsu-forbidden
+		expect(kuikaeForbiddenCodes('chi', 5, [4, 6])).toEqual([5]);
+	});
+
+	it('an in-suit suji swap IS forbidden', () => {
+		// hand 7m,8m + called 9m → run 7-8-9m; the 7-8 ryanmen also waits on 6m, so
+		// discarding 6m is the swap-back — forbidden alongside the genbutsu 9m.
+		expect(kuikaeForbiddenCodes('chi', 9, [7, 8]).sort((a, b) => a - b)).toEqual([6, 9]);
+	});
+
+	it('does not cross the suit boundary', () => {
+		// hand 8m,9m + called 7m → run 7-8-9m, called the low end; the swap tile
+		// would be 10m, which doesn't exist (8-9 is a penchan, only waits on 7) → none.
+		expect(kuikaeForbiddenCodes('chi', 7, [8, 9])).toEqual([7]);
+		// hand 1m,2m + called 3m → run 1-2-3m, called the high end; the swap tile
+		// would be 0 off the low edge (1-2 penchan, only waits on 3) → none.
+		expect(kuikaeForbiddenCodes('chi', 3, [1, 2])).toEqual([3]);
+	});
+});
+
+describe('kuikae — engine wiring', () => {
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+	});
+
+	it('a human pon sets the forbidden set; the called tile cannot be discarded', async () => {
+		// Hand holds two 7p (code 16) + the discarded 7p is ponned; plus a spare 9p.
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(16, 90),
+			lastDiscardSeat: 1,
+			players: [
+				makePlayer(0, { hand: [tile(16, 1), tile(16, 2), tile(18, 3)] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const afterPon = humanClaimPon(state, [tile(16, 1), tile(16, 2)]);
+		expect(afterPon.players[0].kuikaeForbidden).toEqual([16]);
+
+		// Trying to discard a 7p (the third one in the meld is gone; the rule is by
+		// code, so even a different-id 7p would be blocked — here we discard the 9p
+		// instead, which works, while a forbidden discard is a no-op).
+		const blocked = await humanDiscard(afterPon, 90 /* not in hand */);
+		expect(blocked).toBe(afterPon); // wrong id → no-op anyway
+		// The 9p discard succeeds and clears the forbidden set.
+		const ok = await humanDiscard(afterPon, 3);
+		expect(ok.players[0].discards.map((t) => t.code)).toEqual([18]);
+		expect(ok.players[0].kuikaeForbidden).toEqual([]);
+	});
+
+	it('rejects discarding the forbidden called tile', async () => {
+		// After a pon of 7p, the hand still has a 7p (a 4th copy) it must not dump.
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(16, 90),
+			lastDiscardSeat: 1,
+			players: [
+				makePlayer(0, { hand: [tile(16, 1), tile(16, 2), tile(16, 4), tile(18, 3)] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const afterPon = humanClaimPon(state, [tile(16, 1), tile(16, 2)]);
+		expect(afterPon.players[0].kuikaeForbidden).toEqual([16]);
+		// Discarding the leftover 7p (id 4) is rejected — it's the called code.
+		const blocked = await humanDiscard(afterPon, 4);
+		expect(blocked).toBe(afterPon);
+	});
+});
+
+// ─── kokushi can rob an ankan ────────────────────────────────────────────────
+
+describe('kokushi rob of an ankan', () => {
+	// A North (code 30, an honor → a kokushi tile) ankan, with 10 filler tiles to
+	// make the declaring hand a legal 14.
+	function ankanState(): GameState {
+		const hand = [
+			tile(30, 1),
+			tile(30, 2),
+			tile(30, 3),
+			tile(30, 4),
+			...Array.from({ length: 10 }, (_, i) => tile((i % 9) + 1, 10 + i))
+		];
+		return makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			players: [
+				makePlayer(0, { hand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+	}
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+	});
+
+	it('a kokushi wait robs the ankan — the round ends with that seat winning', async () => {
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: true,
+			han: 13,
+			fu: 0,
+			score: 32000,
+			yaku: [{ name: 'Kokushi (13-sided)', han: 13 }],
+			yakuNames: ['Kokushi (13-sided)']
+		});
+
+		const result = await humanDeclareAnkan(ankanState(), 30);
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult?.winner).toBe(1);
+		expect(result.roundResult?.winType).toBe('ron');
+		// The kan never made it onto the declarer's hand — it was robbed.
+		expect(result.players[0].melds).toHaveLength(0);
+	});
+
+	it('a non-kokushi win does NOT rob the ankan — the kan stands', async () => {
+		// A plausible-but-illegal robber: a tanki on North that is not kokushi.
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: true,
+			han: 2,
+			fu: 40,
+			score: 2600,
+			yaku: [{ name: 'Toitoi', han: 2 }],
+			yakuNames: ['Toitoi']
+		});
+
+		const result = await humanDeclareAnkan(ankanState(), 30);
+		expect(result.roundResult).toBeNull();
+		expect(result.players[0].melds).toHaveLength(1);
+		expect(result.players[0].melds[0].type).toBe('ankan');
+	});
+});
+
+// ─── nagashi mangan ──────────────────────────────────────────────────────────
+
+describe('nagashi mangan', () => {
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: false,
+			han: 0,
+			fu: 0,
+			score: 0,
+			yaku: [],
+			yakuNames: []
+		});
+	});
+
+	// Drive the round to an exhaustive draw via a human pass on the last drawable
+	// tile (next to draw is seat 0 → drawTile exhausts → applyExhaustiveDraw).
+	function drawAt(players: GameState['players'], dealer: Seat = 0): Promise<GameState> {
+		const state = makeState({
+			phase: 'claim_decision',
+			dealer,
+			lastDiscard: tile(5, 50),
+			lastDiscardSeat: 3,
+			pendingRon: null,
+			claimOptions: [],
+			wallPos: 69,
+			wallEnd: 69,
+			players
+		});
+		return humanPassClaim(state);
+	}
+
+	it('scores a dealer nagashi as a mangan tsumo (12000), replacing tenpai payments', async () => {
+		const result = await drawAt([
+			// All four discards terminal/honor (1m, 9m, East, North), none called.
+			makePlayer(0, { discards: [tile(1, 1), tile(9, 2), tile(28, 3), tile(31, 4)] }),
+			makePlayer(1, { discards: [tile(5, 10)] }),
+			makePlayer(2, { discards: [tile(6, 11)] }),
+			makePlayer(3, { discards: [tile(7, 12)] })
+		] as GameState['players']);
+
+		expect(result.exhaustiveDrawResult?.nagashiSeats).toEqual([0]);
+		expect(result.exhaustiveDrawResult?.pointChanges).toEqual([12000, -4000, -4000, -4000]);
+	});
+
+	it('scores a non-dealer nagashi as 8000 (4000 from dealer, 2000 each)', async () => {
+		const result = await drawAt(
+			[
+				makePlayer(0, { discards: [tile(5, 1)] }),
+				makePlayer(1, { discards: [tile(1, 10), tile(9, 11), tile(28, 12)] }),
+				makePlayer(2, { discards: [tile(6, 13)] }),
+				makePlayer(3, { discards: [tile(7, 14)] })
+			] as GameState['players'],
+			0 // dealer is seat 0; the nagashi seat (1) is a non-dealer
+		);
+
+		expect(result.exhaustiveDrawResult?.nagashiSeats).toEqual([1]);
+		expect(result.exhaustiveDrawResult?.pointChanges).toEqual([-4000, 8000, -2000, -2000]);
+	});
+
+	it('a called discard disqualifies the seat (falls back to tenpai payments)', async () => {
+		const result = await drawAt([
+			makePlayer(0, {
+				discards: [tile(1, 1), tile(9, 2), tile(28, 3)],
+				anyDiscardCalled: true
+			}),
+			makePlayer(1, { discards: [tile(5, 10)] }),
+			makePlayer(2, { discards: [tile(6, 11)] }),
+			makePlayer(3, { discards: [tile(7, 12)] })
+		] as GameState['players']);
+
+		expect(result.exhaustiveDrawResult?.nagashiSeats).toEqual([]);
+		// All noten (getShanten mocked 8) → no exchange.
+		expect(result.exhaustiveDrawResult?.pointChanges).toEqual([0, 0, 0, 0]);
+	});
+
+	it('a single simple discard disqualifies the seat', async () => {
+		const result = await drawAt([
+			makePlayer(0, { discards: [tile(1, 1), tile(5, 2), tile(28, 3)] }), // 5m is simple
+			makePlayer(1, { discards: [tile(6, 10)] }),
+			makePlayer(2, { discards: [tile(6, 11)] }),
+			makePlayer(3, { discards: [tile(7, 12)] })
+		] as GameState['players']);
+
+		expect(result.exhaustiveDrawResult?.nagashiSeats).toEqual([]);
+	});
+});
+
+// ─── abortive draws ──────────────────────────────────────────────────────────
+
+function kanMeld(code: number, base: number): Meld {
+	return {
+		type: 'ankan',
+		tiles: [tile(code, base), tile(code, base + 1), tile(code, base + 2), tile(code, base + 3)],
+		calledFrom: null
+	};
+}
+
+describe('abortive draws', () => {
+	beforeEach(() => {
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: false,
+			han: 0,
+			fu: 0,
+			score: 0,
+			yaku: [],
+			yakuNames: []
+		});
+	});
+
+	it('suufon renda: all four discard the same wind on the first go-around', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		// Dealer is seat 1, so the human (seat 0) is the fourth discarder. Seats
+		// 1–3 have each discarded East already; the human discards East now.
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 1,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand: [tile(28, 1), tile(5, 2)], discards: [] }),
+				makePlayer(1, { discards: [tile(28, 10)] }),
+				makePlayer(2, { discards: [tile(28, 11)] }),
+				makePlayer(3, { discards: [tile(28, 12)] })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1); // discard the East (id 1)
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('suufon');
+	});
+
+	it('a non-wind first go-around does NOT abort', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 1,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(6, 2)], discards: [] }),
+				makePlayer(1, { discards: [tile(5, 10)] }),
+				makePlayer(2, { discards: [tile(5, 11)] }),
+				makePlayer(3, { discards: [tile(5, 12)] })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1); // discard 5m, not a wind
+		expect(result.abortiveDraw).toBeNull();
+	});
+
+	it('suucha riichi: the fourth riichi aborts the round', async () => {
+		vi.mocked(getShanten).mockReturnValue(0); // human hand is tenpai → riichi legal
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(6, 2)], discards: [tile(9, 50)] }),
+				makePlayer(1, { isRiichi: true }),
+				makePlayer(2, { isRiichi: true }),
+				makePlayer(3, { isRiichi: true })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1, true); // declare the 4th riichi
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('suucha-riichi');
+	});
+
+	it('suukaikan: four kans across two seats abort', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(6, 2)] }),
+				makePlayer(1, { melds: [kanMeld(1, 100), kanMeld(2, 110)] }),
+				makePlayer(2, { melds: [kanMeld(3, 120), kanMeld(4, 130)] }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1);
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('suukaikan');
+	});
+
+	it('four kans by ONE seat (suukantsu) does NOT abort', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(6, 2)] }),
+				makePlayer(1, {
+					melds: [kanMeld(1, 100), kanMeld(2, 110), kanMeld(3, 120), kanMeld(4, 130)]
+				}),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1);
+		expect(result.abortiveDraw).toBeNull();
+	});
+});
+
+describe('kyuushu kyuuhai', () => {
+	// A 14-tile hand with 9 distinct terminals/honors (1m 9m 1p 9p 1s 9s E S W).
+	const NINE_TYPES = [1, 9, 10, 18, 19, 27, 28, 29, 30];
+
+	it('canDeclareKyuushu is true on a 9+ terminal/honor first draw', () => {
+		const hand = [...NINE_TYPES, 1, 9, 10, 18, 19].map((c, i) => tile(c, i + 1));
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+		expect(canDeclareKyuushu(state)).toBe(true);
+		const result = humanDeclareKyuushu(state);
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('kyuushu');
+	});
+
+	it('is false with only 8 distinct terminals/honors', () => {
+		const eight = [1, 9, 10, 18, 19, 27, 28, 29];
+		const hand = [...eight, 1, 9, 10, 18, 19, 27].map((c, i) => tile(c, i + 1));
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+		expect(canDeclareKyuushu(state)).toBe(false);
+	});
+
+	it('is false once a call has interrupted the first go-around', () => {
+		const hand = [...NINE_TYPES, 1, 9, 10, 18, 19].map((c, i) => tile(c, i + 1));
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			anyCallMadeThisRound: true,
+			players: [
+				makePlayer(0, { hand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+		expect(canDeclareKyuushu(state)).toBe(false);
+	});
+});
+
+// ─── pao (sekinin barai) ─────────────────────────────────────────────────────
+
+describe('pao (sekinin barai)', () => {
+	const DAISANGEN = {
+		isWin: true,
+		han: 13,
+		fu: 0,
+		score: 32000,
+		yaku: [{ name: 'Daisangen', han: 13 }],
+		yakuNames: ['Daisangen']
+	};
+
+	function ponMeld(code: number, base: number, from: Seat): Meld {
+		return {
+			type: 'pon',
+			tiles: [tile(code, base), tile(code, base + 1), tile(code, base + 2)],
+			calledFrom: from
+		};
+	}
+
+	it('a fed 3rd dragon pon attaches pao to the feeder', () => {
+		// Human already holds Haku + Hatsu pons; pons the Chun (code 34) fed by seat 2.
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(34, 90),
+			lastDiscardSeat: 2,
+			players: [
+				makePlayer(0, {
+					hand: [tile(34, 1), tile(34, 2)],
+					melds: [ponMeld(32, 10, 1), ponMeld(33, 20, 3)]
+				}),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const after = humanClaimPon(state, [tile(34, 1), tile(34, 2)]);
+		expect(after.players[0].paoSeat).toBe(2);
+	});
+
+	it('pao tsumo: the liable seat pays the whole yakuman', async () => {
+		vi.mocked(checkWin).mockResolvedValue(DAISANGEN);
+		const state = makeState({
+			dealer: 0,
+			honba: 0,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: Array.from({ length: 14 }, (_, i) => tile(34, i + 1)), paoSeat: 1 }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await checkTsumo(state, 2);
+		expect(result?.pointChanges).toEqual([0, -32000, 32000, 0]);
+	});
+
+	it('pao ron off a different discarder: discarder and pao seat split the value', async () => {
+		vi.mocked(checkWin).mockResolvedValue(DAISANGEN);
+		const state = makeState({
+			honba: 0,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: Array.from({ length: 13 }, (_, i) => tile(34, i + 1)), paoSeat: 1 }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		// Seat 2 rons seat 3's discard; seat 1 is the pao seat.
+		const result = await checkRon(state, 2, tile(34, 99), 3);
+		expect(result?.pointChanges).toEqual([0, -16000, 32000, -16000]);
+	});
+
+	it('pao ron where the pao seat IS the discarder: they pay all', async () => {
+		vi.mocked(checkWin).mockResolvedValue(DAISANGEN);
+		const state = makeState({
+			honba: 0,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: Array.from({ length: 13 }, (_, i) => tile(34, i + 1)), paoSeat: 1 }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await checkRon(state, 2, tile(34, 99), 1);
+		expect(result?.pointChanges).toEqual([0, -32000, 32000, 0]);
+	});
+
+	it('no pao when the win is not the attached yakuman', async () => {
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: true,
+			han: 3,
+			fu: 30,
+			score: 3900,
+			yaku: [{ name: 'Honitsu', han: 3 }],
+			yakuNames: ['Honitsu']
+		});
+		const state = makeState({
+			honba: 0,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: Array.from({ length: 13 }, (_, i) => tile(5, i + 1)), paoSeat: 1 }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await checkRon(state, 2, tile(5, 99), 3);
+		// Ordinary ron: the discarder (seat 3) pays the whole thing.
+		expect(result?.pointChanges).toEqual([0, 0, 3900, -3900]);
+	});
+});
+
+// ─── double ron / triple ron ─────────────────────────────────────────────────
+
+describe('double ron (pays both) and triple ron (abort)', () => {
+	// checkWin reports a win for any hand holding the marker tile (code 7), so the
+	// test controls exactly which seats can ron the human's discard.
+	function markWin() {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockImplementation(async ({ handCodes }) =>
+			handCodes.includes(7)
+				? {
+						isWin: true,
+						han: 1,
+						fu: 30,
+						score: 1000,
+						yaku: [{ name: 'Riichi', han: 1 }],
+						yakuNames: ['Riichi']
+					}
+				: { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] }
+		);
+	}
+
+	it('two seats ron the same discard — both are paid by the discarder', async () => {
+		markWin();
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 0,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(2, 2)] }),
+				makePlayer(1, { hand: [tile(7, 10)] }), // can ron
+				makePlayer(2, { hand: [tile(7, 11)] }), // can ron
+				makePlayer(3, { hand: [tile(3, 12)] }) // cannot
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1); // discard 5m
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult?.winner).toBe(1); // nearest the discarder
+		expect(result.extraRons.map((r) => r.winner)).toEqual([2]);
+		// Discarder pays 1000 to each; winners +1000.
+		expect(result.players[0].score).toBe(23000);
+		expect(result.players[1].score).toBe(26000);
+		expect(result.players[2].score).toBe(26000);
+		expect(result.players[3].score).toBe(25000);
+	});
+
+	it('the nearest winner collects the riichi-stick pool', async () => {
+		markWin();
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 0,
+			riichiBets: 2, // two 1000-pt sticks on the table
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(2, 2)] }),
+				makePlayer(1, { hand: [tile(7, 10)] }),
+				makePlayer(2, { hand: [tile(7, 11)] }),
+				makePlayer(3, { hand: [tile(3, 12)] })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1);
+		// Seat 1 (nearest) gets its 1000 + the 2000 stick pool; seat 2 just its 1000.
+		expect(result.players[1].score).toBe(28000);
+		expect(result.players[2].score).toBe(26000);
+		expect(result.riichiBets).toBe(0);
+	});
+
+	it('three seats ron the same discard — sanchahou abortive draw', async () => {
+		markWin();
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 0,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(2, 2)] }),
+				makePlayer(1, { hand: [tile(7, 10)] }),
+				makePlayer(2, { hand: [tile(7, 11)] }),
+				makePlayer(3, { hand: [tile(7, 12)] })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1);
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('sanchahou');
+		expect(result.roundResult).toBeNull();
+	});
+
+	it('dealer renchan when the dealer is one of the double-ron winners', () => {
+		const state = makeState({
+			phase: 'round_end',
+			dealer: 1,
+			round: 2,
+			roundResult: {
+				winner: 1,
+				winType: 'ron',
+				loser: 0,
+				han: 1,
+				fu: 30,
+				score: 1000,
+				yaku: [],
+				pointChanges: [-1000, 1000, 0, 0]
+			},
+			extraRons: [
+				{
+					winner: 2,
+					winType: 'ron',
+					loser: 0,
+					han: 1,
+					fu: 30,
+					score: 1000,
+					yaku: [],
+					pointChanges: [-1000, 0, 1000, 0]
+				}
+			],
+			players: [makePlayer(0), makePlayer(1), makePlayer(2), makePlayer(3)] as GameState['players']
+		});
+
+		const next = continueGame(state);
+		expect(next.dealer).toBe(1); // dealer kept the deal
+		expect(next.round).toBe(2);
 	});
 });

@@ -70,6 +70,14 @@ export function chooseDiscard(seat: Seat, state: GameState, declaringRiichi = fa
 
 	let ranked = rankDiscards(hand);
 
+	// Kuikae: on the turn right after a chi/pon, the called tile (and the chi
+	// suji other-end) is off-limits. Drop those discards; a hand always has
+	// other tiles, but keep a guard against filtering everything away.
+	if (player.kuikaeForbidden.length > 0) {
+		const allowed = ranked.filter((o) => !player.kuikaeForbidden.includes(o.tile.code));
+		if (allowed.length > 0) ranked = allowed;
+	}
+
 	// The riichi-declaring discard must keep the hand tenpai — without this, the
 	// good AI's safe-tile fallback below could declare riichi and then discard a
 	// safe tile that breaks its own tenpai (an illegal riichi).

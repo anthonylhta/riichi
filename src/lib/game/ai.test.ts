@@ -30,6 +30,9 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 		riichiTile: null,
 		isFuriten: false,
 		isTempFuriten: false,
+		kuikaeForbidden: [],
+		anyDiscardCalled: false,
+		paoSeat: null,
 		...overrides
 	};
 }
@@ -61,7 +64,9 @@ function makeState(player1: PlayerState, overrides: Partial<GameState> = {}): Ga
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
+		extraRons: [],
 		exhaustiveDrawResult: null,
+		abortiveDraw: null,
 		events: [],
 		...overrides
 	};

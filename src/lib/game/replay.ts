@@ -19,6 +19,7 @@ import {
 	humanClaimDaiminkan,
 	humanDeclareAnkan,
 	humanDeclareKakan,
+	humanDeclareKyuushu,
 	humanPassClaim
 } from './engine';
 
@@ -33,6 +34,7 @@ export type ReplayInput =
 	| { t: 'daiminkan'; tileIds: number[] }
 	| { t: 'ankan'; code: number }
 	| { t: 'kakan'; meldIndex: number }
+	| { t: 'kyuushu' }
 	| { t: 'pass' }
 	// `wall` is the next hand's wall, or null when this nextRound ended the game
 	// (game_end deals no new hand). Attaching it to the input keeps walls aligned
@@ -83,6 +85,9 @@ async function applyInput(state: GameState, input: ReplayInput): Promise<GameSta
 			return settle(await humanDeclareAnkan(state, input.code));
 		case 'kakan':
 			return settle(await humanDeclareKakan(state, input.meldIndex));
+		case 'kyuushu':
+			// Abortive draw (round_end); nothing to settle, like tsumo/ron.
+			return humanDeclareKyuushu(state);
 		case 'pass':
 			return settle(await humanPassClaim(state));
 		case 'nextRound':

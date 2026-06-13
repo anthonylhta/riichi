@@ -26,6 +26,9 @@ function player(overrides: Partial<PlayerState>): PlayerState {
 		riichiTile: null,
 		isFuriten: false,
 		isTempFuriten: false,
+		kuikaeForbidden: [],
+		anyDiscardCalled: false,
+		paoSeat: null,
 		...overrides
 	};
 }
@@ -62,7 +65,9 @@ function stateWith(p: PlayerState): GameState {
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
+		extraRons: [],
 		exhaustiveDrawResult: null,
+		abortiveDraw: null,
 		events: []
 	};
 }

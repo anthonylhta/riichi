@@ -12,7 +12,8 @@ import {
 	humanPassClaim,
 	humanDeclareAnkan,
 	humanDeclareKakan,
-	humanClaimDaiminkan
+	humanClaimDaiminkan,
+	humanDeclareKyuushu
 } from '$lib/game/engine';
 import { settle } from '$lib/game/autoplay';
 import {
@@ -270,6 +271,19 @@ export async function passClaim() {
 		await settleTurns(next);
 	} catch (e) {
 		console.error('passClaim failed:', e);
+	}
+}
+
+// Kyuushu kyuuhai — the player aborts their first-draw nine-terminals/honors hand.
+export async function declareKyuushu() {
+	const current = get(gameState);
+	if (!current) return;
+	try {
+		recordInput({ t: 'kyuushu' });
+		const next = humanDeclareKyuushu(current);
+		await settleTurns(next);
+	} catch (e) {
+		console.error('declareKyuushu failed:', e);
 	}
 }
 

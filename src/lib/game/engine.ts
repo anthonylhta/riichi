@@ -1,6 +1,7 @@
-import { createWall, shuffleTiles, TC } from './tiles';
+import { createWall, shuffleTiles, TC, isSimple } from './tiles';
 import type { GameTile, TileCode } from './tiles';
 import type {
+	AbortReason,
 	ClaimOption,
 	ExhaustiveDrawResult,
 	GameState,
@@ -54,8 +55,34 @@ function makePlayer(seat: Seat): PlayerState {
 		isIppatsu: false,
 		riichiTile: null,
 		isFuriten: false,
-		isTempFuriten: false
+		isTempFuriten: false,
+		kuikaeForbidden: [],
+		anyDiscardCalled: false,
+		paoSeat: null
 	};
+}
+
+// Kuikae (swap-call ban): the tile codes a seat may not discard on the turn
+// immediately following a chi/pon. After a pon it's just the called tile
+// (genbutsu). After a chi it's the called tile PLUS the "suji" other end —
+// the tile that, with the same two hand tiles, would have formed the
+// equivalent run from the opposite side (only when the call completes an end
+// of the run, not a kanchan middle). Codes only; red-five flavour is irrelevant.
+export function kuikaeForbiddenCodes(
+	callType: 'pon' | 'chi',
+	calledCode: TileCode,
+	consumedCodes: TileCode[]
+): TileCode[] {
+	if (callType === 'pon') return [calledCode];
+
+	const forbidden = [calledCode];
+	const [lo, , hi] = [...consumedCodes, calledCode].sort((a, b) => a - b);
+	const suitStart = Math.floor((calledCode - 1) / 9) * 9 + 1;
+	const suitEnd = suitStart + 8;
+	if (calledCode === lo && hi + 1 <= suitEnd)
+		forbidden.push(hi + 1); // called the low end → swap is one past the high end
+	else if (calledCode === hi && lo - 1 >= suitStart) forbidden.push(lo - 1); // called the high end → swap is one below the low end
+	return forbidden;
 }
 
 function initRound(
@@ -127,7 +154,9 @@ function initRound(
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
+		extraRons: [],
 		exhaustiveDrawResult: null,
+		abortiveDraw: null,
 		events: [
 			...priorEvents,
 			{
@@ -173,16 +202,25 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	let nextRound = state.round;
 
 	if (result === null) {
-		// Exhaustive draw: honba always advances, but the dealer keeps the deal
-		// (renchan) only if tenpai. A noten dealer passes the deal and the round
-		// advances — otherwise a noten draw repeats the same hand forever.
+		// Any draw bumps honba. An abortive draw (kyuushu/suufon/suucha-riichi/
+		// suukaikan/sanchahou) voids the hand and the dealer always keeps the deal.
+		// An ordinary exhaustive draw keeps the dealer only on tenpai (or nagashi);
+		// a noten dealer passes — otherwise a noten draw repeats the hand forever.
 		nextHonba++;
-		const dealerTenpai = state.exhaustiveDrawResult?.tenpaiSeats.includes(state.dealer) ?? false;
-		if (!dealerTenpai) {
-			nextDealer = ((state.dealer + 1) % 4) as Seat;
-			nextRound++;
+		if (state.abortiveDraw === null) {
+			const dealerTenpai = state.exhaustiveDrawResult?.tenpaiSeats.includes(state.dealer) ?? false;
+			const dealerNagashi =
+				state.exhaustiveDrawResult?.nagashiSeats.includes(state.dealer) ?? false;
+			if (!dealerTenpai && !dealerNagashi) {
+				nextDealer = ((state.dealer + 1) % 4) as Seat;
+				nextRound++;
+			}
 		}
-	} else if (result.winner === state.dealer) {
+	} else if (
+		result.winner === state.dealer ||
+		state.extraRons.some((r) => r.winner === state.dealer)
+	) {
+		// Dealer won (or was one of the double-ron winners) → renchan.
 		nextHonba++;
 	} else {
 		nextDealer = ((state.dealer + 1) % 4) as Seat;
@@ -215,6 +253,19 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	return initRound(scores, nextDealer, nextRound, nextHonba, carryBets, wall, state.events);
 }
 
+// A seat scores nagashi mangan if every one of its discards is a terminal/honor
+// and none of them was ever called by another seat (anyDiscardCalled). A seat
+// with no discards at all does not qualify.
+function nagashiSeatsOf(state: GameState): Seat[] {
+	const seats: Seat[] = [];
+	for (let seat = 0; seat < 4; seat++) {
+		const p = state.players[seat];
+		if (p.discards.length === 0 || p.anyDiscardCalled) continue;
+		if (p.discards.every((t) => !isSimple(t.code))) seats.push(seat as Seat);
+	}
+	return seats;
+}
+
 function applyExhaustiveDraw(state: GameState): GameState {
 	const tenpaiSeats: Seat[] = [];
 	for (let seat = 0; seat < 4; seat++) {
@@ -224,15 +275,32 @@ function applyExhaustiveDraw(state: GameState): GameState {
 		}
 	}
 
-	const tenpaiCount = tenpaiSeats.length;
-	const notenCount = 4 - tenpaiCount;
+	const nagashiSeats = nagashiSeatsOf(state);
 	const pointChanges: [number, number, number, number] = [0, 0, 0, 0];
 
-	if (tenpaiCount > 0 && tenpaiCount < 4) {
-		const tenpaiGain = 3000 / tenpaiCount;
-		const notenLoss = 3000 / notenCount;
-		for (let seat = 0; seat < 4; seat++) {
-			pointChanges[seat] = tenpaiSeats.includes(seat as Seat) ? tenpaiGain : -notenLoss;
+	if (nagashiSeats.length > 0) {
+		// Nagashi mangan is paid like a tsumo (dealer 12000 = 4000 all; non-dealer
+		// 8000 = 4000/2000/2000), and REPLACES the ordinary tenpai/noten exchange
+		// (Tenhou / MJ Soul). Multiple nagashi each settle independently.
+		for (const seat of nagashiSeats) {
+			if (seat === state.dealer) {
+				for (let i = 0; i < 4; i++) pointChanges[i] += i === seat ? 12000 : -4000;
+			} else {
+				for (let i = 0; i < 4; i++) {
+					if (i === seat) pointChanges[i] += 8000;
+					else pointChanges[i] += i === state.dealer ? -4000 : -2000;
+				}
+			}
+		}
+	} else {
+		const tenpaiCount = tenpaiSeats.length;
+		const notenCount = 4 - tenpaiCount;
+		if (tenpaiCount > 0 && tenpaiCount < 4) {
+			const tenpaiGain = 3000 / tenpaiCount;
+			const notenLoss = 3000 / notenCount;
+			for (let seat = 0; seat < 4; seat++) {
+				pointChanges[seat] = tenpaiSeats.includes(seat as Seat) ? tenpaiGain : -notenLoss;
+			}
 		}
 	}
 
@@ -241,7 +309,7 @@ function applyExhaustiveDraw(state: GameState): GameState {
 		players[i].score += pointChanges[i];
 	}
 
-	const exhaustiveDrawResult: ExhaustiveDrawResult = { tenpaiSeats, pointChanges };
+	const exhaustiveDrawResult: ExhaustiveDrawResult = { tenpaiSeats, pointChanges, nagashiSeats };
 	const ended: GameState = {
 		...state,
 		players,
@@ -250,6 +318,84 @@ function applyExhaustiveDraw(state: GameState): GameState {
 		exhaustiveDrawResult
 	};
 	return pushEvent(ended, { type: 'ryuukyoku', tenpaiSeats, deltas: pointChanges });
+}
+
+// End the round as an abortive draw: the hand is voided (no scoring), and a
+// zeroed exhaustive-draw result is set so the round-end draw overlay still
+// renders. continueGame reads `abortiveDraw` to keep the dealer's deal.
+function applyAbortiveDraw(state: GameState, reason: AbortReason): GameState {
+	const ended: GameState = {
+		...state,
+		phase: 'round_end',
+		roundResult: null,
+		exhaustiveDrawResult: { tenpaiSeats: [], pointChanges: [0, 0, 0, 0], nagashiSeats: [] },
+		abortiveDraw: reason
+	};
+	return pushEvent(ended, {
+		type: 'ryuukyoku',
+		tenpaiSeats: [],
+		deltas: [0, 0, 0, 0],
+		abortive: reason
+	});
+}
+
+// Suukaikan: four kans exist across two or more seats. Four kans by ONE seat is
+// suukantsu (tenpai) and does NOT abort — only a split set of four does.
+function suukaikanAbort(state: GameState): boolean {
+	let total = 0;
+	const seatsWithKan = new Set<number>();
+	for (const p of state.players) {
+		const kans = p.melds.filter((m) => m.tiles.length === 4).length;
+		total += kans;
+		if (kans > 0) seatsWithKan.add(p.seat);
+	}
+	return total >= 4 && seatsWithKan.size >= 2;
+}
+
+const WIND_CODES: TileCode[] = [TC.EAST, TC.SOUTH, TC.WEST, TC.NORTH];
+
+// Abort conditions evaluated right after a discard has survived every ron check,
+// before any call on it: suukaikan, suucha riichi (all four in riichi), and
+// suufon renda (all four discarded the same wind on the uninterrupted first
+// go-around). Returns the aborted round-end state, or null to continue play.
+function checkAbortAfterDiscard(state: GameState): GameState | null {
+	if (suukaikanAbort(state)) return applyAbortiveDraw(state, 'suukaikan');
+	if (state.players.every((p) => p.isRiichi)) return applyAbortiveDraw(state, 'suucha-riichi');
+	const firstWind = state.players[0].discards[0];
+	if (
+		!state.anyCallMadeThisRound &&
+		state.players.every((p) => p.discards.length === 1) &&
+		firstWind &&
+		WIND_CODES.includes(firstWind.code) &&
+		state.players.every((p) => p.discards[0].code === firstWind.code)
+	) {
+		return applyAbortiveDraw(state, 'suufon');
+	}
+	return null;
+}
+
+// Kyuushu kyuuhai: a player may abort on their first uninterrupted draw (no calls
+// yet, no discard yet) if the 14-tile hand holds 9+ distinct terminals/honors.
+function distinctTerminalsHonors(hand: GameTile[]): number {
+	const codes = new Set<TileCode>();
+	for (const t of hand) if (!isSimple(t.code)) codes.add(t.code);
+	return codes.size;
+}
+
+export function canDeclareKyuushu(state: GameState): boolean {
+	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return false;
+	const player = state.players[0];
+	return (
+		!state.anyCallMadeThisRound &&
+		player.discards.length === 0 &&
+		player.melds.length === 0 &&
+		distinctTerminalsHonors(player.hand) >= 9
+	);
+}
+
+export function humanDeclareKyuushu(state: GameState): GameState {
+	if (!canDeclareKyuushu(state)) return state;
+	return applyAbortiveDraw(state, 'kyuushu');
 }
 
 function drawTile(state: GameState, seat: Seat): GameState {
@@ -286,6 +432,27 @@ function countAka(tiles: GameTile[]): number {
 
 function meldTiles(player: PlayerState): GameTile[] {
 	return player.melds.flatMap((m) => m.tiles);
+}
+
+// Pao (sekinin barai): after a fed pon/daiminkan of a dragon or wind, the feeder
+// becomes liable if this completes a daisangen (3 dragon triplet/quad melds) or a
+// daisuushii (4 wind triplet/quad melds). A chi can never form one; a concealed
+// triplet or ankan has no feeder, so pao is only ever evaluated on a call path.
+function paoLiableSeat(melds: Meld[], feeder: Seat): Seat | null {
+	const triplets = melds.filter((m) => m.type !== 'chi');
+	const dragonMelds = triplets.filter((m) => m.tiles[0].code >= TC.HAKU).length;
+	if (dragonMelds === 3) return feeder;
+	const windMelds = triplets.filter(
+		(m) => m.tiles[0].code >= TC.EAST && m.tiles[0].code <= TC.NORTH
+	).length;
+	if (windMelds === 4) return feeder;
+	return null;
+}
+
+// A win is pao-liable only when it actually contains the big-three or big-four-
+// winds yakuman the pao was attached to.
+function isPaoYakuman(yaku: { name: string }[]): boolean {
+	return yaku.some((y) => y.name === 'Daisangen' || y.name === 'Daisuushi');
 }
 
 export async function checkTsumo(
@@ -325,6 +492,25 @@ export async function checkTsumo(
 	if (!result.isWin) return null;
 
 	const pointChanges: [number, number, number, number] = [0, 0, 0, 0];
+
+	// Pao tsumo: the liable feeder pays the ENTIRE hand (plus all the honba), the
+	// other two opponents pay nothing.
+	if (player.paoSeat !== null && isPaoYakuman(result.yaku)) {
+		const total = result.score + state.honba * 300;
+		pointChanges[seat] = total;
+		pointChanges[player.paoSeat] = -total;
+		return {
+			winner: seat,
+			winType: 'tsumo',
+			loser: null,
+			han: result.han,
+			fu: result.fu,
+			score: result.score,
+			yaku: result.yaku,
+			pointChanges
+		};
+	}
+
 	const honbaBonus = state.honba * 100;
 
 	if (seat === state.dealer) {
@@ -390,8 +576,18 @@ export async function checkRon(
 	const total = result.score + honbaBonus;
 
 	const pointChanges: [number, number, number, number] = [0, 0, 0, 0];
-	pointChanges[discarderSeat] = -total;
 	pointChanges[claimantSeat] = total;
+
+	// Pao ron: the liable feeder splits the hand value with the discarder (the
+	// discarder also covers the honba). When the discarder IS the pao seat, they
+	// simply pay all of it.
+	const paoSeat = player.paoSeat;
+	if (paoSeat !== null && paoSeat !== discarderSeat && isPaoYakuman(result.yaku)) {
+		pointChanges[discarderSeat] = -(result.score / 2 + honbaBonus);
+		pointChanges[paoSeat] = -(result.score / 2);
+	} else {
+		pointChanges[discarderSeat] = -total;
+	}
 
 	return {
 		winner: claimantSeat,
@@ -421,6 +617,16 @@ async function aiCheckRon(
 	if (!ron) return null;
 	if (await computeOwnDiscardFuriten(state, claimantSeat)) return null;
 	return ron;
+}
+
+// Robbing an ankan (chankan on a concealed kan) is legal for KOKUSHI MUSOU ONLY —
+// unlike a kakan, which any wait can rob. A normal wait that happens to complete
+// on the kanned tile must NOT win here, so we keep the ron only when the hand is
+// kokushi (single- or 13-sided wait). Furiten is enforced by the caller (it picks
+// the furiten-aware ron path), so this is a pure post-filter on the win.
+function asKokushiRob(ron: RoundResult | null): RoundResult | null {
+	if (!ron) return null;
+	return ron.yaku.some((y) => y.name.startsWith('Kokushi')) ? ron : null;
 }
 
 export function applyRoundResult(
@@ -465,6 +671,87 @@ export function applyRoundResult(
 		deltas,
 		uraIndicators: state.players[result.winner].isRiichi ? [...state.uraDoraIndicators] : []
 	});
+}
+
+// Collect every seat that can ron `discardTile`, in turn order from the discarder
+// (nearest first). `humanIn` is true only when the human has chosen to ron — the
+// human's furiten still blocks them; AI seats are furiten-checked by aiCheckRon.
+async function collectRons(
+	state: GameState,
+	discardTile: GameTile,
+	discarderSeat: Seat,
+	humanIn: boolean
+): Promise<{ seat: Seat; result: RoundResult }[]> {
+	const winners: { seat: Seat; result: RoundResult }[] = [];
+	for (let offset = 1; offset <= 3; offset++) {
+		const seat = ((discarderSeat + offset) % 4) as Seat;
+		if (seat === 0 && !humanIn) continue;
+		const h = state.players[0];
+		const ron =
+			seat === 0
+				? h.isFuriten || h.isTempFuriten
+					? null
+					: await checkRon(state, 0, discardTile, discarderSeat)
+				: await aiCheckRon(state, seat, discardTile, discarderSeat);
+		if (ron) winners.push({ seat, result: ron });
+	}
+	return winners;
+}
+
+// Resolve a set of ron winners (already nearest-first). Zero → caller continues;
+// one → ordinary ron; two → double ron (MJ Soul pays both, sticks + honba to the
+// nearest winner); three → sanchahou abortive draw.
+function applyRons(
+	state: GameState,
+	winners: { seat: Seat; result: RoundResult }[],
+	winTile?: GameTile
+): GameState {
+	if (winners.length === 0) return state;
+	if (winners.length >= 3) return applyAbortiveDraw(state, 'sanchahou');
+	if (winners.length === 1) return applyRoundResult(state, winners[0].result, winTile);
+
+	// Double ron. Each winner is paid their hand value by the discarder; only the
+	// nearest (winners[0]) keeps the honba (checkRon folded it into each swing, so
+	// strip it from the others) and the riichi-stick pool.
+	const honba = state.honba * 300;
+	const players = clonePlayers(state);
+	const sticks = state.riichiBets * 1000;
+	const adjusted = winners.map(({ seat, result }, idx) => {
+		const pc = [...result.pointChanges] as [number, number, number, number];
+		if (idx > 0 && result.loser !== null) {
+			pc[result.winner] -= honba;
+			pc[result.loser] += honba;
+		}
+		return { seat, result, pc };
+	});
+	for (const { pc } of adjusted) for (let i = 0; i < 4; i++) players[i].score += pc[i];
+	players[winners[0].seat].score += sticks;
+
+	let ended: GameState = {
+		...state,
+		players,
+		roundResult: winners[0].result,
+		extraRons: winners.slice(1).map((w) => w.result),
+		phase: 'round_end',
+		riichiBets: 0
+	};
+	for (const { seat, result, pc } of adjusted) {
+		const deltas = [...pc] as Scores;
+		if (seat === winners[0].seat) deltas[seat] += sticks;
+		ended = pushEvent(ended, {
+			type: 'win',
+			seat,
+			from: result.loser,
+			tile: winTile ?? state.lastDiscard,
+			han: result.han,
+			fu: result.fu,
+			score: result.score,
+			yaku: result.yaku,
+			deltas,
+			uraIndicators: state.players[seat].isRiichi ? [...state.uraDoraIndicators] : []
+		});
+	}
+	return ended;
 }
 
 function getPonOption(hand: GameTile[], calledTile: GameTile): ClaimOption | null {
@@ -755,6 +1042,9 @@ async function applyAiCalls(
 			const ids = new Set(daiminkanTiles.map((t) => t.id));
 			players[seat].hand = sortHand(player.hand.filter((t) => !ids.has(t.id)));
 			players[seat].melds = [...player.melds, meld];
+			players[discarderSeat].anyDiscardCalled = true;
+			players[seat].paoSeat =
+				paoLiableSeat(players[seat].melds, discarderSeat) ?? players[seat].paoSeat;
 			for (const p of players) p.isIppatsu = false;
 			const postKan = pushEvent(
 				{ ...state, players, anyCallMadeThisRound: true },
@@ -783,6 +1073,13 @@ async function applyAiCalls(
 				player.hand.filter((t) => t.id !== ponTiles[0].id && t.id !== ponTiles[1].id)
 			);
 			players[seat].melds = [...player.melds, meld];
+			players[seat].kuikaeForbidden = kuikaeForbiddenCodes('pon', discardTile.code, [
+				ponTiles[0].code,
+				ponTiles[1].code
+			]);
+			players[discarderSeat].anyDiscardCalled = true;
+			players[seat].paoSeat =
+				paoLiableSeat(players[seat].melds, discarderSeat) ?? players[seat].paoSeat;
 			for (const p of players) p.isIppatsu = false;
 			return pushEvent(
 				{ ...state, players, anyCallMadeThisRound: true, phase: 'ai_turn', currentSeat: seat },
@@ -814,6 +1111,11 @@ async function applyAiCalls(
 				chiPlayer.hand.filter((t) => t.id !== chiTiles[0].id && t.id !== chiTiles[1].id)
 			);
 			players[chiSeat].melds = [...chiPlayer.melds, meld];
+			players[chiSeat].kuikaeForbidden = kuikaeForbiddenCodes('chi', discardTile.code, [
+				chiTiles[0].code,
+				chiTiles[1].code
+			]);
+			players[discarderSeat].anyDiscardCalled = true;
 			for (const p of players) p.isIppatsu = false;
 			return pushEvent(
 				{
@@ -848,6 +1150,9 @@ export async function humanDiscard(
 	const player = state.players[0];
 	const tile = player.hand.find((t) => t.id === tileId);
 	if (!tile) return state;
+	// Kuikae: the called tile (and chi suji other-end) can't be discarded on the
+	// turn right after the call. Reject it — the UI also disables these tiles.
+	if (player.kuikaeForbidden.includes(tile.code)) return state;
 
 	// Riichi is opt-in: the player must explicitly request it, and it is only legal
 	// from a closed hand with 1000+ points that stays tenpai after this discard.
@@ -864,6 +1169,7 @@ export async function humanDiscard(
 	const players = clonePlayers(state);
 	players[0].hand = sortHand(player.hand.filter((t) => t.id !== tileId));
 	players[0].discards = [...player.discards, tile];
+	players[0].kuikaeForbidden = []; // the post-call restriction lasts one discard
 
 	if (player.isRiichi && player.isIppatsu) {
 		// Post-riichi discard clears the ippatsu window
@@ -902,14 +1208,15 @@ export async function humanDiscard(
 	}
 	const newState = { ...postDiscard, players: furitenPlayers };
 
-	for (let s = 1; s < 4; s++) {
-		const ron = await aiCheckRon(newState, s as Seat, tile, 0);
-		if (ron) return applyRoundResult(newState, ron);
-	}
+	const ronWinners = await collectRons(newState, tile, 0, false);
+	if (ronWinners.length > 0) return applyRons(newState, ronWinners);
 
 	// The discard survived every ron check — flip any deferred minkan dora and
 	// complete a pending riichi.
-	return applyAiCalls(settleDiscard(newState), tile, 0);
+	const settled = settleDiscard(newState);
+	const aborted = checkAbortAfterDiscard(settled);
+	if (aborted) return aborted;
+	return applyAiCalls(settled, tile, 0);
 }
 
 export async function humanDeclareTsumo(state: GameState): Promise<GameState> {
@@ -918,13 +1225,17 @@ export async function humanDeclareTsumo(state: GameState): Promise<GameState> {
 }
 
 export async function humanDeclareRon(state: GameState): Promise<GameState> {
-	if (state.phase === 'claim_decision' && state.pendingRon) {
-		return applyRoundResult(state, state.pendingRon);
+	if (!state.lastDiscard || state.lastDiscardSeat === null) {
+		// No discard context to scan for other winners — honour the precomputed
+		// human ron directly.
+		return state.pendingRon ? applyRoundResult(state, state.pendingRon) : state;
 	}
-	if (!state.lastDiscard || state.lastDiscardSeat === null) return state;
-	const ron = await checkRon(state, 0, state.lastDiscard, state.lastDiscardSeat);
-	if (!ron) return state;
-	return applyRoundResult(state, ron);
+	// The human is in the ron; collect any AI seats that also ron the same tile so
+	// a double ron pays both (and a triple ron aborts). Ordered nearest-first from
+	// the discarder so the head-bump for sticks/honba lands on the closest winner.
+	const winners = await collectRons(state, state.lastDiscard, state.lastDiscardSeat, true);
+	if (winners.length === 0) return state;
+	return applyRons(state, winners);
 }
 
 function applyCall(state: GameState, players: ReturnType<typeof clonePlayers>): GameState {
@@ -952,6 +1263,13 @@ export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameStat
 		player.hand.filter((t) => t.id !== handTiles[0].id && t.id !== handTiles[1].id)
 	);
 	players[0].melds = [...player.melds, meld];
+	players[0].kuikaeForbidden = kuikaeForbiddenCodes('pon', calledTile.code, [
+		handTiles[0].code,
+		handTiles[1].code
+	]);
+	players[state.lastDiscardSeat!].anyDiscardCalled = true;
+	players[0].paoSeat =
+		paoLiableSeat(players[0].melds, state.lastDiscardSeat!) ?? players[0].paoSeat;
 
 	const called = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -983,6 +1301,11 @@ export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameStat
 		player.hand.filter((t) => t.id !== handTiles[0].id && t.id !== handTiles[1].id)
 	);
 	players[0].melds = [...player.melds, meld];
+	players[0].kuikaeForbidden = kuikaeForbiddenCodes('chi', calledTile.code, [
+		handTiles[0].code,
+		handTiles[1].code
+	]);
+	players[state.lastDiscardSeat!].anyDiscardCalled = true;
 
 	const called = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -1005,7 +1328,17 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 	if (!getAnkanOptions(player).includes(code)) return state;
 	const matching = player.hand.filter((t) => t.code === code);
 
-	const players = clonePlayers(state);
+	// The ankan is recorded before the chankan-rob check — a robbed kan still
+	// happened, and the record shows the ankan followed by the ron. Only kokushi
+	// may rob an ankan.
+	const declared = pushEvent(state, { type: 'ankan', seat: 0, consumed: matching.slice(0, 4) });
+	const robbedTile = matching[0];
+	for (let s = 1; s < 4; s++) {
+		const ron = asKokushiRob(await aiCheckRon(declared, s as Seat, robbedTile, 0, true));
+		if (ron) return applyRoundResult(declared, ron, robbedTile);
+	}
+
+	const players = clonePlayers(declared);
 	players[0].hand = sortHand(player.hand.filter((t) => t.code !== code));
 	players[0].melds = [
 		...player.melds,
@@ -1014,10 +1347,7 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 	// ANY call breaks ippatsu for everyone — including the kan declarer's own.
 	// (Riichi → ankan → rinshan tsumo scores rinshan only, never ippatsu.)
 	for (const p of players) p.isIppatsu = false;
-	const postKan = pushEvent(
-		{ ...state, players, anyCallMadeThisRound: true },
-		{ type: 'ankan', seat: 0, consumed: matching.slice(0, 4) }
-	);
+	const postKan = { ...declared, players, anyCallMadeThisRound: true };
 
 	const drawn = drawRinshan(postKan, 0, true);
 	const tsumo = await checkTsumo(drawn, 0, true);
@@ -1087,6 +1417,9 @@ export async function humanClaimDaiminkan(
 	const handTileIds = new Set(handTiles.map((t) => t.id));
 	players[0].hand = sortHand(player.hand.filter((t) => !handTileIds.has(t.id)));
 	players[0].melds = [...player.melds, meld];
+	players[state.lastDiscardSeat!].anyDiscardCalled = true;
+	players[0].paoSeat =
+		paoLiableSeat(players[0].melds, state.lastDiscardSeat!) ?? players[0].paoSeat;
 
 	const postKan = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -1137,19 +1470,18 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 
 	// runAiTurn hands the decision to the human *before* it checks AI claims, so a
 	// human pass must not silently forfeit them. Resolve the AI's claim on this same
-	// discard in priority order — ron first, then pon/chi/daiminkan — before
-	// advancing. Head-bump: among multiple winning seats, the one closest to the
-	// discarder in turn order takes the ron.
-	for (let offset = 1; offset <= 3; offset++) {
-		const claimant = ((discarderSeat + offset) % 4) as Seat;
-		if (claimant === 0) continue; // the human just passed
-		const ron = await aiCheckRon(cleared, claimant, discardTile, discarderSeat);
-		if (ron) return applyRoundResult(cleared, ron);
-	}
+	// discard — ron first (collect all: a double ron pays both, a triple aborts),
+	// then pon/chi/daiminkan — before advancing. The human just passed, so they are
+	// excluded from the ron.
+	const aiRonWinners = await collectRons(cleared, discardTile, discarderSeat, false);
+	if (aiRonWinners.length > 0) return applyRons(cleared, aiRonWinners);
 
 	// The discard survived every ron check — flip any deferred minkan dora and
 	// complete a pending riichi.
 	const settled = settleDiscard(cleared);
+
+	const aborted = checkAbortAfterDiscard(settled);
+	if (aborted) return aborted;
 
 	const afterAiCalls = await applyAiCalls(settled, discardTile, discarderSeat);
 	if (afterAiCalls !== settled) return afterAiCalls;
@@ -1207,6 +1539,25 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 			const code = ankanCodes[0];
 			const aiPlayer = s.players[seat];
 			const matching = aiPlayer.hand.filter((t) => t.code === code);
+			// Record the ankan before the chankan-rob check — only kokushi may rob
+			// an ankan, by any other seat (the human via their furiten flags).
+			s = pushEvent(s, { type: 'ankan', seat, consumed: matching.slice(0, 4) });
+			const robbedTile = matching[0];
+			let robbed: GameState | null = null;
+			for (let offset = 1; offset <= 3; offset++) {
+				const claimant = ((seat + offset) % 4) as Seat;
+				const claimer = s.players[claimant];
+				const ron = claimer.isHuman
+					? claimer.isFuriten || claimer.isTempFuriten
+						? null
+						: asKokushiRob(await checkRon(s, 0, robbedTile, seat, true))
+					: asKokushiRob(await aiCheckRon(s, claimant, robbedTile, seat, true));
+				if (ron) {
+					robbed = applyRoundResult(s, ron, robbedTile);
+					break;
+				}
+			}
+			if (robbed) return robbed;
 			const players = clonePlayers(s);
 			players[seat].hand = sortHand(aiPlayer.hand.filter((t) => t.code !== code));
 			players[seat].melds = [
@@ -1215,10 +1566,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 			];
 			// Own kan breaks own ippatsu too — same rule as the human ankan path.
 			for (const p of players) p.isIppatsu = false;
-			const postKan = pushEvent(
-				{ ...s, players, anyCallMadeThisRound: true },
-				{ type: 'ankan', seat, consumed: matching.slice(0, 4) }
-			);
+			const postKan = { ...s, players, anyCallMadeThisRound: true };
 			s = drawRinshan(postKan, seat, true);
 			const kanTsumo = await checkTsumo(s, seat, true);
 			if (kanTsumo) return applyRoundResult(s, kanTsumo);
@@ -1282,6 +1630,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	const players = clonePlayers(s);
 	players[seat].hand = sortHand(s.players[seat].hand.filter((t) => t.id !== discardTile.id));
 	players[seat].discards = [...s.players[seat].discards, discardTile];
+	players[seat].kuikaeForbidden = []; // the post-call restriction lasts one discard
 	// Post-riichi discard closes this AI player's ippatsu window — but never on
 	// the declaring discard itself: isRiichi is already true by this point (the
 	// flags are set just above), and the window is supposed to OPEN here. The
@@ -1317,19 +1666,19 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		};
 	}
 
-	// Check AI ron — in turn order from the discarder, so a head-bump between two
-	// waiting seats goes to the closer one
-	for (let offset = 1; offset <= 3; offset++) {
-		const claimant = ((seat + offset) % 4) as Seat;
-		if (state.players[claimant].isHuman) continue;
-		const ron = await aiCheckRon(s, claimant, discardTile, seat);
-		if (ron) return applyRoundResult(s, ron);
-	}
+	// Check AI ron — in turn order from the discarder (nearest first). The human
+	// has no claim here (the claim_decision branch above handles that), so only AI
+	// seats can win: collect them all so a double ron pays both / a triple aborts.
+	const aiRonWinners = await collectRons(s, discardTile, seat, false);
+	if (aiRonWinners.length > 0) return applyRons(s, aiRonWinners);
 
 	// The discard survived every ron check — flip any deferred minkan dora and
 	// complete a pending riichi. (In the claim_decision path above the human can
 	// still ron, so settling waits for humanPassClaim / a claim handler instead.)
 	s = settleDiscard(s);
+
+	const aborted = checkAbortAfterDiscard(s);
+	if (aborted) return aborted;
 
 	// Check AI pon/chi/daiminkan
 	const afterAiCalls = await applyAiCalls(s, discardTile, seat);
@@ -1365,7 +1714,10 @@ function clonePlayers(state: GameState): [PlayerState, PlayerState, PlayerState,
 		discards: [...p.discards],
 		melds: [...p.melds],
 		isFuriten: p.isFuriten,
-		isTempFuriten: p.isTempFuriten
+		isTempFuriten: p.isTempFuriten,
+		kuikaeForbidden: [...p.kuikaeForbidden],
+		anyDiscardCalled: p.anyDiscardCalled,
+		paoSeat: p.paoSeat
 	})) as [PlayerState, PlayerState, PlayerState, PlayerState];
 }
 
