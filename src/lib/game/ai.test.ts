@@ -31,6 +31,7 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 		isFuriten: false,
 		isTempFuriten: false,
 		kuikaeForbidden: [],
+		anyDiscardCalled: false,
 		...overrides
 	};
 }

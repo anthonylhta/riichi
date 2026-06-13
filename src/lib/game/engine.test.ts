@@ -58,6 +58,7 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 		isFuriten: false,
 		isTempFuriten: false,
 		kuikaeForbidden: [],
+		anyDiscardCalled: false,
 		...overrides
 	};
 }
@@ -550,7 +551,7 @@ describe('continueGame — exhaustive draw renchan', () => {
 			honba: 0,
 			dealer,
 			roundResult: null,
-			exhaustiveDrawResult: { tenpaiSeats, pointChanges: [0, 0, 0, 0] },
+			exhaustiveDrawResult: { tenpaiSeats, pointChanges: [0, 0, 0, 0], nagashiSeats: [] },
 			...overrides
 		});
 
@@ -837,7 +838,7 @@ describe('continueGame — leftover riichi sticks go to 1st place', () => {
 			round,
 			dealer: 3,
 			roundResult: null,
-			exhaustiveDrawResult: { tenpaiSeats: [], pointChanges: [0, 0, 0, 0] },
+			exhaustiveDrawResult: { tenpaiSeats: [], pointChanges: [0, 0, 0, 0], nagashiSeats: [] },
 			riichiBets,
 			players: scores.map((s, i) => makePlayer(i, { score: s })) as GameState['players']
 		});
@@ -1918,5 +1919,93 @@ describe('kokushi rob of an ankan', () => {
 		expect(result.roundResult).toBeNull();
 		expect(result.players[0].melds).toHaveLength(1);
 		expect(result.players[0].melds[0].type).toBe('ankan');
+	});
+});
+
+// ─── nagashi mangan ──────────────────────────────────────────────────────────
+
+describe('nagashi mangan', () => {
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: false,
+			han: 0,
+			fu: 0,
+			score: 0,
+			yaku: [],
+			yakuNames: []
+		});
+	});
+
+	// Drive the round to an exhaustive draw via a human pass on the last drawable
+	// tile (next to draw is seat 0 → drawTile exhausts → applyExhaustiveDraw).
+	function drawAt(players: GameState['players'], dealer: Seat = 0): Promise<GameState> {
+		const state = makeState({
+			phase: 'claim_decision',
+			dealer,
+			lastDiscard: tile(5, 50),
+			lastDiscardSeat: 3,
+			pendingRon: null,
+			claimOptions: [],
+			wallPos: 69,
+			wallEnd: 69,
+			players
+		});
+		return humanPassClaim(state);
+	}
+
+	it('scores a dealer nagashi as a mangan tsumo (12000), replacing tenpai payments', async () => {
+		const result = await drawAt([
+			// All four discards terminal/honor (1m, 9m, East, North), none called.
+			makePlayer(0, { discards: [tile(1, 1), tile(9, 2), tile(28, 3), tile(31, 4)] }),
+			makePlayer(1, { discards: [tile(5, 10)] }),
+			makePlayer(2, { discards: [tile(6, 11)] }),
+			makePlayer(3, { discards: [tile(7, 12)] })
+		] as GameState['players']);
+
+		expect(result.exhaustiveDrawResult?.nagashiSeats).toEqual([0]);
+		expect(result.exhaustiveDrawResult?.pointChanges).toEqual([12000, -4000, -4000, -4000]);
+	});
+
+	it('scores a non-dealer nagashi as 8000 (4000 from dealer, 2000 each)', async () => {
+		const result = await drawAt(
+			[
+				makePlayer(0, { discards: [tile(5, 1)] }),
+				makePlayer(1, { discards: [tile(1, 10), tile(9, 11), tile(28, 12)] }),
+				makePlayer(2, { discards: [tile(6, 13)] }),
+				makePlayer(3, { discards: [tile(7, 14)] })
+			] as GameState['players'],
+			0 // dealer is seat 0; the nagashi seat (1) is a non-dealer
+		);
+
+		expect(result.exhaustiveDrawResult?.nagashiSeats).toEqual([1]);
+		expect(result.exhaustiveDrawResult?.pointChanges).toEqual([-4000, 8000, -2000, -2000]);
+	});
+
+	it('a called discard disqualifies the seat (falls back to tenpai payments)', async () => {
+		const result = await drawAt([
+			makePlayer(0, {
+				discards: [tile(1, 1), tile(9, 2), tile(28, 3)],
+				anyDiscardCalled: true
+			}),
+			makePlayer(1, { discards: [tile(5, 10)] }),
+			makePlayer(2, { discards: [tile(6, 11)] }),
+			makePlayer(3, { discards: [tile(7, 12)] })
+		] as GameState['players']);
+
+		expect(result.exhaustiveDrawResult?.nagashiSeats).toEqual([]);
+		// All noten (getShanten mocked 8) → no exchange.
+		expect(result.exhaustiveDrawResult?.pointChanges).toEqual([0, 0, 0, 0]);
+	});
+
+	it('a single simple discard disqualifies the seat', async () => {
+		const result = await drawAt([
+			makePlayer(0, { discards: [tile(1, 1), tile(5, 2), tile(28, 3)] }), // 5m is simple
+			makePlayer(1, { discards: [tile(6, 10)] }),
+			makePlayer(2, { discards: [tile(6, 11)] }),
+			makePlayer(3, { discards: [tile(7, 12)] })
+		] as GameState['players']);
+
+		expect(result.exhaustiveDrawResult?.nagashiSeats).toEqual([]);
 	});
 });

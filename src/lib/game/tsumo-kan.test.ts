@@ -27,6 +27,7 @@ function player(overrides: Partial<PlayerState>): PlayerState {
 		isFuriten: false,
 		isTempFuriten: false,
 		kuikaeForbidden: [],
+		anyDiscardCalled: false,
 		...overrides
 	};
 }

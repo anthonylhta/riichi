@@ -1,4 +1,4 @@
-import { createWall, shuffleTiles, TC } from './tiles';
+import { createWall, shuffleTiles, TC, isSimple } from './tiles';
 import type { GameTile, TileCode } from './tiles';
 import type {
 	ClaimOption,
@@ -55,7 +55,8 @@ function makePlayer(seat: Seat): PlayerState {
 		riichiTile: null,
 		isFuriten: false,
 		isTempFuriten: false,
-		kuikaeForbidden: []
+		kuikaeForbidden: [],
+		anyDiscardCalled: false
 	};
 }
 
@@ -201,8 +202,11 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 		// (renchan) only if tenpai. A noten dealer passes the deal and the round
 		// advances — otherwise a noten draw repeats the same hand forever.
 		nextHonba++;
+		// Dealer renchan on a draw: keep the deal when tenpai — or when the dealer
+		// scored nagashi mangan (effectively a dealer "win", so the deal repeats).
 		const dealerTenpai = state.exhaustiveDrawResult?.tenpaiSeats.includes(state.dealer) ?? false;
-		if (!dealerTenpai) {
+		const dealerNagashi = state.exhaustiveDrawResult?.nagashiSeats.includes(state.dealer) ?? false;
+		if (!dealerTenpai && !dealerNagashi) {
 			nextDealer = ((state.dealer + 1) % 4) as Seat;
 			nextRound++;
 		}
@@ -239,6 +243,19 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	return initRound(scores, nextDealer, nextRound, nextHonba, carryBets, wall, state.events);
 }
 
+// A seat scores nagashi mangan if every one of its discards is a terminal/honor
+// and none of them was ever called by another seat (anyDiscardCalled). A seat
+// with no discards at all does not qualify.
+function nagashiSeatsOf(state: GameState): Seat[] {
+	const seats: Seat[] = [];
+	for (let seat = 0; seat < 4; seat++) {
+		const p = state.players[seat];
+		if (p.discards.length === 0 || p.anyDiscardCalled) continue;
+		if (p.discards.every((t) => !isSimple(t.code))) seats.push(seat as Seat);
+	}
+	return seats;
+}
+
 function applyExhaustiveDraw(state: GameState): GameState {
 	const tenpaiSeats: Seat[] = [];
 	for (let seat = 0; seat < 4; seat++) {
@@ -248,15 +265,32 @@ function applyExhaustiveDraw(state: GameState): GameState {
 		}
 	}
 
-	const tenpaiCount = tenpaiSeats.length;
-	const notenCount = 4 - tenpaiCount;
+	const nagashiSeats = nagashiSeatsOf(state);
 	const pointChanges: [number, number, number, number] = [0, 0, 0, 0];
 
-	if (tenpaiCount > 0 && tenpaiCount < 4) {
-		const tenpaiGain = 3000 / tenpaiCount;
-		const notenLoss = 3000 / notenCount;
-		for (let seat = 0; seat < 4; seat++) {
-			pointChanges[seat] = tenpaiSeats.includes(seat as Seat) ? tenpaiGain : -notenLoss;
+	if (nagashiSeats.length > 0) {
+		// Nagashi mangan is paid like a tsumo (dealer 12000 = 4000 all; non-dealer
+		// 8000 = 4000/2000/2000), and REPLACES the ordinary tenpai/noten exchange
+		// (Tenhou / MJ Soul). Multiple nagashi each settle independently.
+		for (const seat of nagashiSeats) {
+			if (seat === state.dealer) {
+				for (let i = 0; i < 4; i++) pointChanges[i] += i === seat ? 12000 : -4000;
+			} else {
+				for (let i = 0; i < 4; i++) {
+					if (i === seat) pointChanges[i] += 8000;
+					else pointChanges[i] += i === state.dealer ? -4000 : -2000;
+				}
+			}
+		}
+	} else {
+		const tenpaiCount = tenpaiSeats.length;
+		const notenCount = 4 - tenpaiCount;
+		if (tenpaiCount > 0 && tenpaiCount < 4) {
+			const tenpaiGain = 3000 / tenpaiCount;
+			const notenLoss = 3000 / notenCount;
+			for (let seat = 0; seat < 4; seat++) {
+				pointChanges[seat] = tenpaiSeats.includes(seat as Seat) ? tenpaiGain : -notenLoss;
+			}
 		}
 	}
 
@@ -265,7 +299,7 @@ function applyExhaustiveDraw(state: GameState): GameState {
 		players[i].score += pointChanges[i];
 	}
 
-	const exhaustiveDrawResult: ExhaustiveDrawResult = { tenpaiSeats, pointChanges };
+	const exhaustiveDrawResult: ExhaustiveDrawResult = { tenpaiSeats, pointChanges, nagashiSeats };
 	const ended: GameState = {
 		...state,
 		players,
@@ -789,6 +823,7 @@ async function applyAiCalls(
 			const ids = new Set(daiminkanTiles.map((t) => t.id));
 			players[seat].hand = sortHand(player.hand.filter((t) => !ids.has(t.id)));
 			players[seat].melds = [...player.melds, meld];
+			players[discarderSeat].anyDiscardCalled = true;
 			for (const p of players) p.isIppatsu = false;
 			const postKan = pushEvent(
 				{ ...state, players, anyCallMadeThisRound: true },
@@ -821,6 +856,7 @@ async function applyAiCalls(
 				ponTiles[0].code,
 				ponTiles[1].code
 			]);
+			players[discarderSeat].anyDiscardCalled = true;
 			for (const p of players) p.isIppatsu = false;
 			return pushEvent(
 				{ ...state, players, anyCallMadeThisRound: true, phase: 'ai_turn', currentSeat: seat },
@@ -856,6 +892,7 @@ async function applyAiCalls(
 				chiTiles[0].code,
 				chiTiles[1].code
 			]);
+			players[discarderSeat].anyDiscardCalled = true;
 			for (const p of players) p.isIppatsu = false;
 			return pushEvent(
 				{
@@ -1002,6 +1039,7 @@ export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameStat
 		handTiles[0].code,
 		handTiles[1].code
 	]);
+	players[state.lastDiscardSeat!].anyDiscardCalled = true;
 
 	const called = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -1037,6 +1075,7 @@ export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameStat
 		handTiles[0].code,
 		handTiles[1].code
 	]);
+	players[state.lastDiscardSeat!].anyDiscardCalled = true;
 
 	const called = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -1148,6 +1187,7 @@ export async function humanClaimDaiminkan(
 	const handTileIds = new Set(handTiles.map((t) => t.id));
 	players[0].hand = sortHand(player.hand.filter((t) => !handTileIds.has(t.id)));
 	players[0].melds = [...player.melds, meld];
+	players[state.lastDiscardSeat!].anyDiscardCalled = true;
 
 	const postKan = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -1444,7 +1484,8 @@ function clonePlayers(state: GameState): [PlayerState, PlayerState, PlayerState,
 		melds: [...p.melds],
 		isFuriten: p.isFuriten,
 		isTempFuriten: p.isTempFuriten,
-		kuikaeForbidden: [...p.kuikaeForbidden]
+		kuikaeForbidden: [...p.kuikaeForbidden],
+		anyDiscardCalled: p.anyDiscardCalled
 	})) as [PlayerState, PlayerState, PlayerState, PlayerState];
 }
 

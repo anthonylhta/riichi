@@ -33,6 +33,9 @@ export interface PlayerState {
 	// (kuikae / swap-call ban): the called tile itself, plus the suji other-end
 	// after a chi. Set when the call is made, cleared on the next discard.
 	kuikaeForbidden: TileCode[];
+	// True once any of this seat's discards has been claimed (pon/chi/kan) by
+	// another seat — disqualifies the seat from nagashi mangan at exhaustive draw.
+	anyDiscardCalled: boolean;
 }
 
 export type GamePhase =
@@ -57,6 +60,11 @@ export interface RoundResult {
 export interface ExhaustiveDrawResult {
 	tenpaiSeats: Seat[];
 	pointChanges: [number, number, number, number];
+	// Seats that achieved nagashi mangan (all discards terminals/honors, none
+	// called). When non-empty, pointChanges holds the nagashi payments instead of
+	// the ordinary tenpai/noten exchange, and each such seat keeps/forces a deal
+	// as in continueGame.
+	nagashiSeats: Seat[];
 }
 
 export interface GameState {
