@@ -202,20 +202,36 @@ function bird(ink: string): string {
 	);
 }
 
+// MS-style top-right index: a small digit on the number suits for quick reading
+// (a red five shows 0 — both the Mahjong Soul aka marker and a glance-able flag).
+// Honours carry no index; their kanji already identifies them.
+function cornerIndex(suit: string, value: number, red: boolean): string {
+	if (suit !== 'man' && suit !== 'pin' && suit !== 'sou') return '';
+	const digit = red ? '0' : String(value);
+	const ink = red ? AKA : inkFor(suit, value, false);
+	return (
+		`<text x="80" y="20" font-size="23" fill="${ink}"` +
+		` font-family="'Inter',system-ui,sans-serif" font-weight="700"` +
+		` text-anchor="middle" dominant-baseline="central">${digit}</text>`
+	);
+}
+
 function faceContent(code: TileCode, red: boolean): string {
 	const suit = getSuit(code);
 	const value = getValue(code);
 	const ink = inkFor(suit, value, red);
+	const idx = cornerIndex(suit, value, red);
 
 	if (suit === 'man') {
-		return kanjiText(MAN_NUMERALS[value], 45, 34, 50, ink) + kanjiText('萬', 45, 86, 44, ink);
+		return kanjiText(MAN_NUMERALS[value], 45, 34, 50, ink) + kanjiText('萬', 45, 86, 44, ink) + idx;
 	}
 	if (suit === 'pin') {
-		return (PIN_COINS[value] ?? []).map((c) => coin(c, ink)).join('');
+		return (PIN_COINS[value] ?? []).map((c) => coin(c, ink)).join('') + idx;
 	}
 	if (suit === 'sou') {
-		if (value === 1) return bird(ink);
-		return (SOU_STICKS[value] ?? []).map((s) => bamboo(s, ink, red)).join('');
+		const art =
+			value === 1 ? bird(ink) : (SOU_STICKS[value] ?? []).map((s) => bamboo(s, ink, red)).join('');
+		return art + idx;
 	}
 	if (suit === 'wind') return kanjiText(WIND_KANJI[value], 45, 60, 62, ink);
 	// dragon

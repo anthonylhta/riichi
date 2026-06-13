@@ -42,6 +42,16 @@ describe('tileFaceSvg', () => {
 		expect(haku).not.toMatch(/<(text|circle|rect|ellipse|path|line)/);
 	});
 
+	it('adds an MS-style corner digit to number suits (0 for a red five), none to honours', () => {
+		// 3p shows "3" in the corner (plus the value lives nowhere else as text).
+		expect(tileFaceSvg(TC.P3)).toContain('>3</text>');
+		// Red five → "0", the aka marker.
+		expect(tileFaceSvg(TC.M5, true)).toContain('>0</text>');
+		expect(tileFaceSvg(TC.M5, false)).toContain('>5</text>');
+		// Honours have no corner digit.
+		expect(tileFaceSvg(TC.EAST)).not.toMatch(/>\d<\/text>/);
+	});
+
 	it('recolours a red five to crimson rather than its suit ink', () => {
 		const plain = tileFaceSvg(TC.S5, false);
 		const red = tileFaceSvg(TC.S5, true);
