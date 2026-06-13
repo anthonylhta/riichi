@@ -30,6 +30,9 @@
 	import { buildReviewPayload, type RoundRecord } from '$lib/game/review';
 	import { buildHelperView, type HelperAdvice } from '$lib/game/helper';
 	import Tile from '$lib/components/Tile.svelte';
+	import GameHeader from '$lib/components/game/GameHeader.svelte';
+	import ExitConfirmPanel from '$lib/components/game/ExitConfirmPanel.svelte';
+	import DevPanel from '$lib/components/game/DevPanel.svelte';
 	import { Show, SignInButton } from 'svelte-clerk';
 
 	// Post-game overview (Claude) — generated on demand from the flagged moments.
@@ -185,16 +188,17 @@
 	// Dev panel — only compiled in dev builds
 	const isDev = import.meta.env.DEV;
 	let devPanelOpen = $state(false);
-	let devSetTenpai: (() => Promise<void>) | null = null;
-	let devSetWinningHand: (() => Promise<void>) | null = null;
-	let devSetRonClaim: (() => Promise<void>) | null = null;
-	let devSetPonClaim: (() => Promise<void>) | null = null;
-	let devSetChiClaim: (() => Promise<void>) | null = null;
-	let devSetFuriten: (() => Promise<void>) | null = null;
-	let devSetAnkan: (() => Promise<void>) | null = null;
-	let devSetKakan: (() => Promise<void>) | null = null;
-	let devSetDaiminkan: (() => Promise<void>) | null = null;
-	let devSetTenpaiToRon: (() => Promise<void>) | null = null;
+	type Cheat = (() => Promise<void>) | null;
+	let devSetTenpai = $state<Cheat>(null);
+	let devSetWinningHand = $state<Cheat>(null);
+	let devSetRonClaim = $state<Cheat>(null);
+	let devSetPonClaim = $state<Cheat>(null);
+	let devSetChiClaim = $state<Cheat>(null);
+	let devSetFuriten = $state<Cheat>(null);
+	let devSetAnkan = $state<Cheat>(null);
+	let devSetKakan = $state<Cheat>(null);
+	let devSetDaiminkan = $state<Cheat>(null);
+	let devSetTenpaiToRon = $state<Cheat>(null);
 
 	if (isDev) {
 		import('$lib/game/devCheats').then((m) => {
@@ -315,36 +319,26 @@
 		<!-- Fixed-aspect stage: everything inside scales together via cq units -->
 		<div class="stage">
 			<!-- Header -->
-			<header class="game-header">
-				<span class="round-label">{roundWindKanji} {roundNumber}</span>
-				{#if $gameState.honba > 0}
-					<span class="honba">{$gameState.honba} 本場</span>
-				{/if}
-				<span class="wall-count">Wall {$gameState.wallEnd - $gameState.wallPos}</span>
-				<button class="menu-btn" onclick={requestExit}>Menu</button>
-				{#if isDev}
-					<button class="dev-toggle" onclick={() => (devPanelOpen = !devPanelOpen)}>
-						{devPanelOpen ? '✕ Dev' : '⚙ Dev'}
-					</button>
-				{/if}
-			</header>
+			<GameHeader
+				{roundWindKanji}
+				{roundNumber}
+				honba={$gameState.honba}
+				wallLeft={$gameState.wallEnd - $gameState.wallPos}
+				{isDev}
+				{devPanelOpen}
+				onMenu={requestExit}
+				onToggleDev={() => (devPanelOpen = !devPanelOpen)}
+			/>
 
 			<!-- Exit confirmation — docked, non-blocking, same family as the claim panel -->
 			{#if confirmExit}
-				<div class="exit-panel">
-					<span class="exit-title">Leave the game?</span>
-					<span class="exit-sub">This game is unfinished — it won't be saved.</span>
-					<div class="exit-actions">
-						<button class="exit-btn exit-stay" onclick={() => (confirmExit = false)}>Stay</button>
-						<button
-							class="exit-btn exit-leave"
-							onclick={() => {
-								abandonGame();
-								goto('/');
-							}}>Leave</button
-						>
-					</div>
-				</div>
+				<ExitConfirmPanel
+					onStay={() => (confirmExit = false)}
+					onLeave={() => {
+						abandonGame();
+						goto('/');
+					}}
+				/>
 			{/if}
 
 			<!-- The table: hands at the four edges, rivers ringing the central board -->
@@ -686,19 +680,18 @@
 
 		<!-- Dev cheat panel — floats over the viewport, outside the scaled stage -->
 		{#if isDev && devPanelOpen}
-			<div class="dev-panel">
-				<span class="dev-label">Dev scenarios</span>
-				<button class="dev-btn" onclick={() => devSetTenpai?.()}>Tenpai hand</button>
-				<button class="dev-btn" onclick={() => devSetWinningHand?.()}>Winning → Tsumo</button>
-				<button class="dev-btn" onclick={() => devSetRonClaim?.()}>Ron claim</button>
-				<button class="dev-btn" onclick={() => devSetPonClaim?.()}>Pon claim</button>
-				<button class="dev-btn" onclick={() => devSetChiClaim?.()}>Chi claim</button>
-				<button class="dev-btn" onclick={() => devSetFuriten?.()}>Furiten (no ron)</button>
-				<button class="dev-btn" onclick={() => devSetAnkan?.()}>Ankan (4-of-a-kind)</button>
-				<button class="dev-btn" onclick={() => devSetKakan?.()}>Kakan (extend pon)</button>
-				<button class="dev-btn" onclick={() => devSetDaiminkan?.()}>Daiminkan claim</button>
-				<button class="dev-btn" onclick={() => devSetTenpaiToRon?.()}>Riichi → Ippatsu Ron</button>
-			</div>
+			<DevPanel
+				setTenpai={devSetTenpai}
+				setWinningHand={devSetWinningHand}
+				setRonClaim={devSetRonClaim}
+				setPonClaim={devSetPonClaim}
+				setChiClaim={devSetChiClaim}
+				setFuriten={devSetFuriten}
+				setAnkan={devSetAnkan}
+				setKakan={devSetKakan}
+				setDaiminkan={devSetDaiminkan}
+				setTenpaiToRon={devSetTenpaiToRon}
+			/>
 		{/if}
 	{/if}
 </div>
@@ -817,99 +810,6 @@
 	.stage :global(.tile-back.variant-pond) {
 		width: calc(var(--u) * 2.6);
 		height: calc(var(--u) * 3.6);
-	}
-
-	.game-header {
-		display: flex;
-		gap: calc(var(--u) * 1.5);
-		align-items: center;
-		padding: 0 calc(var(--u) * 0.5) calc(var(--u) * 0.5);
-		border-bottom: 1px solid #1e1c1a;
-		font-size: calc(var(--u) * 1.8);
-		color: #8a8278;
-		flex: none;
-	}
-
-	.round-label {
-		font-weight: 600;
-		color: #e8e0d5;
-		letter-spacing: 0.04em;
-	}
-
-	.honba {
-		color: #c41e3a;
-	}
-
-	.wall-count {
-		margin-left: auto;
-	}
-
-	.menu-btn {
-		padding: calc(var(--u) * 0.3) calc(var(--u) * 1.2);
-		background: none;
-		border: 1px solid #2e2a26;
-		border-radius: calc(var(--u) * 0.6);
-		color: #8a8278;
-		font-size: calc(var(--u) * 1.5);
-		cursor: pointer;
-		transition:
-			color 0.15s,
-			border-color 0.15s;
-	}
-	.menu-btn:hover {
-		color: #e8e0d5;
-		border-color: #4a443c;
-	}
-
-	/* Exit confirmation: docked under the header, board stays visible. */
-	.exit-panel {
-		position: absolute;
-		right: calc(var(--u) * 3);
-		top: calc(var(--u) * 5);
-		z-index: 50;
-		display: flex;
-		flex-direction: column;
-		gap: calc(var(--u) * 0.6);
-		padding: calc(var(--u) * 1.4) calc(var(--u) * 1.6);
-		background: rgba(20, 18, 16, 0.96);
-		border: 1px solid #3a342c;
-		border-radius: calc(var(--u) * 1.2);
-		box-shadow: 0 calc(var(--u) * 1) calc(var(--u) * 3) rgba(0, 0, 0, 0.6);
-	}
-	.exit-title {
-		font-size: calc(var(--u) * 1.7);
-		color: #cfc7bb;
-		font-weight: 600;
-	}
-	.exit-sub {
-		font-size: calc(var(--u) * 1.4);
-		color: #8a8278;
-	}
-	.exit-actions {
-		display: flex;
-		gap: calc(var(--u) * 0.8);
-		justify-content: flex-end;
-		margin-top: calc(var(--u) * 0.4);
-	}
-	.exit-btn {
-		padding: calc(var(--u) * 0.7) calc(var(--u) * 1.6);
-		border: none;
-		border-radius: calc(var(--u) * 0.6);
-		cursor: pointer;
-		font-size: calc(var(--u) * 1.6);
-		font-weight: 600;
-		transition: opacity 0.15s;
-	}
-	.exit-btn:hover {
-		opacity: 0.85;
-	}
-	.exit-stay {
-		background: #2e2a26;
-		color: #cfc7bb;
-	}
-	.exit-leave {
-		background: #c41e3a;
-		color: #fff;
 	}
 
 	/* ── Table ─────────────────────────────────────────────────────────── */
@@ -1711,60 +1611,5 @@
 		color: #666;
 		max-width: 500px;
 		white-space: pre-wrap;
-	}
-
-	/* ── Dev panel ─────────────────────────────────────────────────────── */
-	.dev-toggle {
-		margin-left: auto;
-		padding: 0.2rem 0.6rem;
-		background: #1a1a1a;
-		border: 1px solid #444;
-		border-radius: 4px;
-		color: #888;
-		font-size: 0.75rem;
-		cursor: pointer;
-	}
-
-	.dev-toggle:hover {
-		border-color: #666;
-		color: #bbb;
-	}
-
-	.dev-panel {
-		position: fixed;
-		top: 0.5rem;
-		left: 0.5rem;
-		z-index: 200;
-		max-width: 60vw;
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		flex-wrap: wrap;
-		padding: 0.5rem 0.75rem;
-		background: #0d0d0d;
-		border: 1px dashed #333;
-		border-radius: 6px;
-		font-size: 0.75rem;
-	}
-
-	.dev-label {
-		color: #555;
-		white-space: nowrap;
-	}
-
-	.dev-btn {
-		padding: 0.3rem 0.7rem;
-		background: #1e1e1e;
-		border: 1px solid #444;
-		border-radius: 4px;
-		color: #aaa;
-		font-size: 0.75rem;
-		cursor: pointer;
-		transition: border-color 0.1s;
-	}
-
-	.dev-btn:hover {
-		border-color: #888;
-		color: #e8e0d5;
 	}
 </style>
