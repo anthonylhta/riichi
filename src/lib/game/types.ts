@@ -124,6 +124,11 @@ export interface GameState {
 	claimOptions: ClaimOption[] | null; // pon/chi options during claim_decision
 
 	roundResult: RoundResult | null;
+	// Additional ron winners on a double ron (MJ Soul pays both). `roundResult`
+	// holds the primary winner — the one nearest the discarder in turn order, who
+	// also collects the riichi sticks + honba; `extraRons` holds the other(s).
+	// Empty on every ordinary single-winner result. (Triple ron aborts instead.)
+	extraRons: RoundResult[];
 	exhaustiveDrawResult: ExhaustiveDrawResult | null;
 	// Non-null when the round ended as an abortive draw (see AbortReason). The
 	// hand is voided: no scoring, dealer keeps, honba +1, sticks carry. A zeroed

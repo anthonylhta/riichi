@@ -64,6 +64,7 @@ function makeState(player1: PlayerState, overrides: Partial<GameState> = {}): Ga
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
+		extraRons: [],
 		exhaustiveDrawResult: null,
 		abortiveDraw: null,
 		events: [],

@@ -221,6 +221,17 @@
 	// distinct terminals/honors.
 	let canKyuushu = $derived($gameState ? canDeclareKyuushu($gameState) : false);
 
+	// All ron winners for the round-end overlay — usually one, two on a double ron.
+	let winners = $derived(
+		$gameState?.roundResult ? [$gameState.roundResult, ...$gameState.extraRons] : []
+	);
+	// Combined point swing across every winner (a double ron pays both).
+	let combinedDeltas = $derived(
+		winners.reduce((acc, w) => acc.map((v, i) => v + w.pointChanges[i]) as number[], [
+			0, 0, 0, 0
+		] as number[])
+	);
+
 	let seatNames = $derived(
 		$gameState
 			? ([0, 1, 2, 3] as const).map((seat) => {
@@ -553,32 +564,32 @@
 				<div class="result-card">
 					{#if $gameState.roundResult}
 						{@const rr = $gameState.roundResult}
-						{@const lim = limitName(rr.han, rr.fu)}
 						<div class="win-announcement">
-							{rr.winType === 'tsumo' ? '自摸' : '栄和'}
+							{rr.winType === 'tsumo' ? '自摸' : winners.length > 1 ? 'ダブロン' : '栄和'}
 						</div>
-						<p class="winner-name">
-							{seatNames[rr.winner]} wins!
-						</p>
 
-						<!-- Yaku breakdown — which yaku and how the score was built -->
-						<div class="yaku-list">
-							{#each rr.yaku as y (y.name)}
-								<div class="yaku-row">
-									<span class="yaku-name">{y.name}</span>
-									<span class="yaku-han">{y.han} han</span>
-								</div>
-							{/each}
-						</div>
-						<p class="score-detail">
-							{#if lim}<span class="limit-name">{lim}</span> ·
-							{/if}{rr.han} han / {rr.fu} fu → {rr.score.toLocaleString()} pts
-							<span class="win-type">({rr.winType})</span>
-						</p>
+						<!-- One block per winner (two on a double ron) -->
+						{#each winners as w (w.winner)}
+							{@const lim = limitName(w.han, w.fu)}
+							<p class="winner-name">{seatNames[w.winner]} wins!</p>
+							<div class="yaku-list">
+								{#each w.yaku as y (y.name)}
+									<div class="yaku-row">
+										<span class="yaku-name">{y.name}</span>
+										<span class="yaku-han">{y.han} han</span>
+									</div>
+								{/each}
+							</div>
+							<p class="score-detail">
+								{#if lim}<span class="limit-name">{lim}</span> ·
+								{/if}{w.han} han / {w.fu} fu → {w.score.toLocaleString()} pts
+								<span class="win-type">({w.winType})</span>
+							</p>
+						{/each}
 
 						<div class="score-changes">
-							{#each rr.pointChanges as change, i (i)}
-								<div class="score-row" class:winner={$gameState.roundResult.winner === i}>
+							{#each combinedDeltas as change, i (i)}
+								<div class="score-row" class:winner={winners.some((w) => w.winner === i)}>
 									<span>{seatNames[i]}</span>
 									<span class:positive={change > 0} class:negative={change < 0}>
 										{change > 0 ? '+' : ''}{change.toLocaleString()}

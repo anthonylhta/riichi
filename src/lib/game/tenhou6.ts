@@ -132,7 +132,8 @@ export function toTenhou6(events: GameEvent[], names: string[] = DEFAULT_NAMES):
 		]);
 	};
 
-	for (const ev of events) {
+	for (let i = 0; i < events.length; i++) {
+		const ev = events[i];
 		switch (ev.type) {
 			case 'round_start': {
 				lastDrawn.fill(null);
@@ -223,9 +224,15 @@ export function toTenhou6(events: GameEvent[], names: string[] = DEFAULT_NAMES):
 				// Score text + yaku are display-only (the parser ignores them).
 				const scoreText = `${ev.fu}符${ev.han}飜${ev.score}点`;
 				const yaku = ev.yaku.map((y) => `${y.name}(${y.han}飜)`);
-				k.results = ['和了', ev.deltas, [ev.seat, ev.from ?? ev.seat, ev.seat, scoreText, ...yaku]];
-				closeKyoku(k);
-				k = null;
+				const agari = [ev.seat, ev.from ?? ev.seat, ev.seat, scoreText, ...yaku];
+				// Double ron appends a (deltas, agari) pair per winner to the one
+				// 和了 result; the kyoku closes only after the last consecutive win.
+				if (k.results[0] === '和了') k.results.push(ev.deltas, agari);
+				else k.results = ['和了', ev.deltas, agari];
+				if (events[i + 1]?.type !== 'win') {
+					closeKyoku(k);
+					k = null;
+				}
 				break;
 			}
 			case 'ryuukyoku': {

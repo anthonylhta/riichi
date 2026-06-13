@@ -50,7 +50,8 @@ export function toMjaiEvents(events: GameEvent[], names: string[] = DEFAULT_NAME
 		}
 	};
 
-	for (const ev of events) {
+	for (let i = 0; i < events.length; i++) {
+		const ev = events[i];
 		switch (ev.type) {
 			case 'round_start': {
 				pendingReach = null;
@@ -142,7 +143,9 @@ export function toMjaiEvents(events: GameEvent[], names: string[] = DEFAULT_NAME
 					fu: ev.fu,
 					yaku: ev.yaku.map((y) => [y.name, y.han])
 				});
-				out.push({ type: 'end_kyoku' });
+				// Double ron emits one hora per winner back-to-back; close the kyoku
+				// only after the last of a consecutive run of wins.
+				if (events[i + 1]?.type !== 'win') out.push({ type: 'end_kyoku' });
 				break;
 			}
 			case 'ryuukyoku': {

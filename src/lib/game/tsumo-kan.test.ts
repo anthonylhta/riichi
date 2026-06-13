@@ -65,6 +65,7 @@ function stateWith(p: PlayerState): GameState {
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
+		extraRons: [],
 		exhaustiveDrawResult: null,
 		abortiveDraw: null,
 		events: []

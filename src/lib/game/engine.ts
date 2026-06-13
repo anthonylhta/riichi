@@ -154,6 +154,7 @@ function initRound(
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
+		extraRons: [],
 		exhaustiveDrawResult: null,
 		abortiveDraw: null,
 		events: [
@@ -215,7 +216,11 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 				nextRound++;
 			}
 		}
-	} else if (result.winner === state.dealer) {
+	} else if (
+		result.winner === state.dealer ||
+		state.extraRons.some((r) => r.winner === state.dealer)
+	) {
+		// Dealer won (or was one of the double-ron winners) → renchan.
 		nextHonba++;
 	} else {
 		nextDealer = ((state.dealer + 1) % 4) as Seat;
@@ -617,8 +622,8 @@ async function aiCheckRon(
 // Robbing an ankan (chankan on a concealed kan) is legal for KOKUSHI MUSOU ONLY —
 // unlike a kakan, which any wait can rob. A normal wait that happens to complete
 // on the kanned tile must NOT win here, so we keep the ron only when the hand is
-// kokushi (single- or 13-sided wait). Furiten is enforced by the caller's ron path
-// (aiCheckRon for AI, the human's flags), so this is a pure post-filter on the win.
+// kokushi (single- or 13-sided wait). Furiten is enforced by the caller (it picks
+// the furiten-aware ron path), so this is a pure post-filter on the win.
 function asKokushiRob(ron: RoundResult | null): RoundResult | null {
 	if (!ron) return null;
 	return ron.yaku.some((y) => y.name.startsWith('Kokushi')) ? ron : null;
@@ -666,6 +671,87 @@ export function applyRoundResult(
 		deltas,
 		uraIndicators: state.players[result.winner].isRiichi ? [...state.uraDoraIndicators] : []
 	});
+}
+
+// Collect every seat that can ron `discardTile`, in turn order from the discarder
+// (nearest first). `humanIn` is true only when the human has chosen to ron — the
+// human's furiten still blocks them; AI seats are furiten-checked by aiCheckRon.
+async function collectRons(
+	state: GameState,
+	discardTile: GameTile,
+	discarderSeat: Seat,
+	humanIn: boolean
+): Promise<{ seat: Seat; result: RoundResult }[]> {
+	const winners: { seat: Seat; result: RoundResult }[] = [];
+	for (let offset = 1; offset <= 3; offset++) {
+		const seat = ((discarderSeat + offset) % 4) as Seat;
+		if (seat === 0 && !humanIn) continue;
+		const h = state.players[0];
+		const ron =
+			seat === 0
+				? h.isFuriten || h.isTempFuriten
+					? null
+					: await checkRon(state, 0, discardTile, discarderSeat)
+				: await aiCheckRon(state, seat, discardTile, discarderSeat);
+		if (ron) winners.push({ seat, result: ron });
+	}
+	return winners;
+}
+
+// Resolve a set of ron winners (already nearest-first). Zero → caller continues;
+// one → ordinary ron; two → double ron (MJ Soul pays both, sticks + honba to the
+// nearest winner); three → sanchahou abortive draw.
+function applyRons(
+	state: GameState,
+	winners: { seat: Seat; result: RoundResult }[],
+	winTile?: GameTile
+): GameState {
+	if (winners.length === 0) return state;
+	if (winners.length >= 3) return applyAbortiveDraw(state, 'sanchahou');
+	if (winners.length === 1) return applyRoundResult(state, winners[0].result, winTile);
+
+	// Double ron. Each winner is paid their hand value by the discarder; only the
+	// nearest (winners[0]) keeps the honba (checkRon folded it into each swing, so
+	// strip it from the others) and the riichi-stick pool.
+	const honba = state.honba * 300;
+	const players = clonePlayers(state);
+	const sticks = state.riichiBets * 1000;
+	const adjusted = winners.map(({ seat, result }, idx) => {
+		const pc = [...result.pointChanges] as [number, number, number, number];
+		if (idx > 0 && result.loser !== null) {
+			pc[result.winner] -= honba;
+			pc[result.loser] += honba;
+		}
+		return { seat, result, pc };
+	});
+	for (const { pc } of adjusted) for (let i = 0; i < 4; i++) players[i].score += pc[i];
+	players[winners[0].seat].score += sticks;
+
+	let ended: GameState = {
+		...state,
+		players,
+		roundResult: winners[0].result,
+		extraRons: winners.slice(1).map((w) => w.result),
+		phase: 'round_end',
+		riichiBets: 0
+	};
+	for (const { seat, result, pc } of adjusted) {
+		const deltas = [...pc] as Scores;
+		if (seat === winners[0].seat) deltas[seat] += sticks;
+		ended = pushEvent(ended, {
+			type: 'win',
+			seat,
+			from: result.loser,
+			tile: winTile ?? state.lastDiscard,
+			han: result.han,
+			fu: result.fu,
+			score: result.score,
+			yaku: result.yaku,
+			deltas,
+			uraIndicators: state.players[seat].isRiichi ? [...state.uraDoraIndicators] : []
+		});
+	}
+	return ended;
 }
 
 function getPonOption(hand: GameTile[], calledTile: GameTile): ClaimOption | null {
@@ -1122,10 +1208,8 @@ export async function humanDiscard(
 	}
 	const newState = { ...postDiscard, players: furitenPlayers };
 
-	for (let s = 1; s < 4; s++) {
-		const ron = await aiCheckRon(newState, s as Seat, tile, 0);
-		if (ron) return applyRoundResult(newState, ron);
-	}
+	const ronWinners = await collectRons(newState, tile, 0, false);
+	if (ronWinners.length > 0) return applyRons(newState, ronWinners);
 
 	// The discard survived every ron check — flip any deferred minkan dora and
 	// complete a pending riichi.
@@ -1141,13 +1225,17 @@ export async function humanDeclareTsumo(state: GameState): Promise<GameState> {
 }
 
 export async function humanDeclareRon(state: GameState): Promise<GameState> {
-	if (state.phase === 'claim_decision' && state.pendingRon) {
-		return applyRoundResult(state, state.pendingRon);
+	if (!state.lastDiscard || state.lastDiscardSeat === null) {
+		// No discard context to scan for other winners — honour the precomputed
+		// human ron directly.
+		return state.pendingRon ? applyRoundResult(state, state.pendingRon) : state;
 	}
-	if (!state.lastDiscard || state.lastDiscardSeat === null) return state;
-	const ron = await checkRon(state, 0, state.lastDiscard, state.lastDiscardSeat);
-	if (!ron) return state;
-	return applyRoundResult(state, ron);
+	// The human is in the ron; collect any AI seats that also ron the same tile so
+	// a double ron pays both (and a triple ron aborts). Ordered nearest-first from
+	// the discarder so the head-bump for sticks/honba lands on the closest winner.
+	const winners = await collectRons(state, state.lastDiscard, state.lastDiscardSeat, true);
+	if (winners.length === 0) return state;
+	return applyRons(state, winners);
 }
 
 function applyCall(state: GameState, players: ReturnType<typeof clonePlayers>): GameState {
@@ -1382,15 +1470,11 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 
 	// runAiTurn hands the decision to the human *before* it checks AI claims, so a
 	// human pass must not silently forfeit them. Resolve the AI's claim on this same
-	// discard in priority order — ron first, then pon/chi/daiminkan — before
-	// advancing. Head-bump: among multiple winning seats, the one closest to the
-	// discarder in turn order takes the ron.
-	for (let offset = 1; offset <= 3; offset++) {
-		const claimant = ((discarderSeat + offset) % 4) as Seat;
-		if (claimant === 0) continue; // the human just passed
-		const ron = await aiCheckRon(cleared, claimant, discardTile, discarderSeat);
-		if (ron) return applyRoundResult(cleared, ron);
-	}
+	// discard — ron first (collect all: a double ron pays both, a triple aborts),
+	// then pon/chi/daiminkan — before advancing. The human just passed, so they are
+	// excluded from the ron.
+	const aiRonWinners = await collectRons(cleared, discardTile, discarderSeat, false);
+	if (aiRonWinners.length > 0) return applyRons(cleared, aiRonWinners);
 
 	// The discard survived every ron check — flip any deferred minkan dora and
 	// complete a pending riichi.
@@ -1582,14 +1666,11 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		};
 	}
 
-	// Check AI ron — in turn order from the discarder, so a head-bump between two
-	// waiting seats goes to the closer one
-	for (let offset = 1; offset <= 3; offset++) {
-		const claimant = ((seat + offset) % 4) as Seat;
-		if (state.players[claimant].isHuman) continue;
-		const ron = await aiCheckRon(s, claimant, discardTile, seat);
-		if (ron) return applyRoundResult(s, ron);
-	}
+	// Check AI ron — in turn order from the discarder (nearest first). The human
+	// has no claim here (the claim_decision branch above handles that), so only AI
+	// seats can win: collect them all so a double ron pays both / a triple aborts.
+	const aiRonWinners = await collectRons(s, discardTile, seat, false);
+	if (aiRonWinners.length > 0) return applyRons(s, aiRonWinners);
 
 	// The discard survived every ron check — flip any deferred minkan dora and
 	// complete a pending riichi. (In the claim_decision path above the human can

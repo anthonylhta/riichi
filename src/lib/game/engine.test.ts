@@ -101,6 +101,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		pendingRon: null,
 		claimOptions: null,
 		roundResult: null,
+		extraRons: [],
 		exhaustiveDrawResult: null,
 		abortiveDraw: null,
 		events: [],
@@ -2306,5 +2307,129 @@ describe('pao (sekinin barai)', () => {
 		const result = await checkRon(state, 2, tile(5, 99), 3);
 		// Ordinary ron: the discarder (seat 3) pays the whole thing.
 		expect(result?.pointChanges).toEqual([0, 0, 3900, -3900]);
+	});
+});
+
+// ─── double ron / triple ron ─────────────────────────────────────────────────
+
+describe('double ron (pays both) and triple ron (abort)', () => {
+	// checkWin reports a win for any hand holding the marker tile (code 7), so the
+	// test controls exactly which seats can ron the human's discard.
+	function markWin() {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockImplementation(async ({ handCodes }) =>
+			handCodes.includes(7)
+				? {
+						isWin: true,
+						han: 1,
+						fu: 30,
+						score: 1000,
+						yaku: [{ name: 'Riichi', han: 1 }],
+						yakuNames: ['Riichi']
+					}
+				: { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] }
+		);
+	}
+
+	it('two seats ron the same discard — both are paid by the discarder', async () => {
+		markWin();
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 0,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(2, 2)] }),
+				makePlayer(1, { hand: [tile(7, 10)] }), // can ron
+				makePlayer(2, { hand: [tile(7, 11)] }), // can ron
+				makePlayer(3, { hand: [tile(3, 12)] }) // cannot
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1); // discard 5m
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult?.winner).toBe(1); // nearest the discarder
+		expect(result.extraRons.map((r) => r.winner)).toEqual([2]);
+		// Discarder pays 1000 to each; winners +1000.
+		expect(result.players[0].score).toBe(23000);
+		expect(result.players[1].score).toBe(26000);
+		expect(result.players[2].score).toBe(26000);
+		expect(result.players[3].score).toBe(25000);
+	});
+
+	it('the nearest winner collects the riichi-stick pool', async () => {
+		markWin();
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 0,
+			riichiBets: 2, // two 1000-pt sticks on the table
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(2, 2)] }),
+				makePlayer(1, { hand: [tile(7, 10)] }),
+				makePlayer(2, { hand: [tile(7, 11)] }),
+				makePlayer(3, { hand: [tile(3, 12)] })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1);
+		// Seat 1 (nearest) gets its 1000 + the 2000 stick pool; seat 2 just its 1000.
+		expect(result.players[1].score).toBe(28000);
+		expect(result.players[2].score).toBe(26000);
+		expect(result.riichiBets).toBe(0);
+	});
+
+	it('three seats ron the same discard — sanchahou abortive draw', async () => {
+		markWin();
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 0,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(2, 2)] }),
+				makePlayer(1, { hand: [tile(7, 10)] }),
+				makePlayer(2, { hand: [tile(7, 11)] }),
+				makePlayer(3, { hand: [tile(7, 12)] })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1);
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('sanchahou');
+		expect(result.roundResult).toBeNull();
+	});
+
+	it('dealer renchan when the dealer is one of the double-ron winners', () => {
+		const state = makeState({
+			phase: 'round_end',
+			dealer: 1,
+			round: 2,
+			roundResult: {
+				winner: 1,
+				winType: 'ron',
+				loser: 0,
+				han: 1,
+				fu: 30,
+				score: 1000,
+				yaku: [],
+				pointChanges: [-1000, 1000, 0, 0]
+			},
+			extraRons: [
+				{
+					winner: 2,
+					winType: 'ron',
+					loser: 0,
+					han: 1,
+					fu: 30,
+					score: 1000,
+					yaku: [],
+					pointChanges: [-1000, 0, 1000, 0]
+				}
+			],
+			players: [makePlayer(0), makePlayer(1), makePlayer(2), makePlayer(3)] as GameState['players']
+		});
+
+		const next = continueGame(state);
+		expect(next.dealer).toBe(1); // dealer kept the deal
+		expect(next.round).toBe(2);
 	});
 });
