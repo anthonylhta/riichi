@@ -28,6 +28,7 @@ function player(overrides: Partial<PlayerState>): PlayerState {
 		isTempFuriten: false,
 		kuikaeForbidden: [],
 		anyDiscardCalled: false,
+		paoSeat: null,
 		...overrides
 	};
 }

@@ -57,7 +57,8 @@ function makePlayer(seat: Seat): PlayerState {
 		isFuriten: false,
 		isTempFuriten: false,
 		kuikaeForbidden: [],
-		anyDiscardCalled: false
+		anyDiscardCalled: false,
+		paoSeat: null
 	};
 }
 
@@ -428,6 +429,27 @@ function meldTiles(player: PlayerState): GameTile[] {
 	return player.melds.flatMap((m) => m.tiles);
 }
 
+// Pao (sekinin barai): after a fed pon/daiminkan of a dragon or wind, the feeder
+// becomes liable if this completes a daisangen (3 dragon triplet/quad melds) or a
+// daisuushii (4 wind triplet/quad melds). A chi can never form one; a concealed
+// triplet or ankan has no feeder, so pao is only ever evaluated on a call path.
+function paoLiableSeat(melds: Meld[], feeder: Seat): Seat | null {
+	const triplets = melds.filter((m) => m.type !== 'chi');
+	const dragonMelds = triplets.filter((m) => m.tiles[0].code >= TC.HAKU).length;
+	if (dragonMelds === 3) return feeder;
+	const windMelds = triplets.filter(
+		(m) => m.tiles[0].code >= TC.EAST && m.tiles[0].code <= TC.NORTH
+	).length;
+	if (windMelds === 4) return feeder;
+	return null;
+}
+
+// A win is pao-liable only when it actually contains the big-three or big-four-
+// winds yakuman the pao was attached to.
+function isPaoYakuman(yaku: { name: string }[]): boolean {
+	return yaku.some((y) => y.name === 'Daisangen' || y.name === 'Daisuushi');
+}
+
 export async function checkTsumo(
 	state: GameState,
 	seat: Seat,
@@ -465,6 +487,25 @@ export async function checkTsumo(
 	if (!result.isWin) return null;
 
 	const pointChanges: [number, number, number, number] = [0, 0, 0, 0];
+
+	// Pao tsumo: the liable feeder pays the ENTIRE hand (plus all the honba), the
+	// other two opponents pay nothing.
+	if (player.paoSeat !== null && isPaoYakuman(result.yaku)) {
+		const total = result.score + state.honba * 300;
+		pointChanges[seat] = total;
+		pointChanges[player.paoSeat] = -total;
+		return {
+			winner: seat,
+			winType: 'tsumo',
+			loser: null,
+			han: result.han,
+			fu: result.fu,
+			score: result.score,
+			yaku: result.yaku,
+			pointChanges
+		};
+	}
+
 	const honbaBonus = state.honba * 100;
 
 	if (seat === state.dealer) {
@@ -530,8 +571,18 @@ export async function checkRon(
 	const total = result.score + honbaBonus;
 
 	const pointChanges: [number, number, number, number] = [0, 0, 0, 0];
-	pointChanges[discarderSeat] = -total;
 	pointChanges[claimantSeat] = total;
+
+	// Pao ron: the liable feeder splits the hand value with the discarder (the
+	// discarder also covers the honba). When the discarder IS the pao seat, they
+	// simply pay all of it.
+	const paoSeat = player.paoSeat;
+	if (paoSeat !== null && paoSeat !== discarderSeat && isPaoYakuman(result.yaku)) {
+		pointChanges[discarderSeat] = -(result.score / 2 + honbaBonus);
+		pointChanges[paoSeat] = -(result.score / 2);
+	} else {
+		pointChanges[discarderSeat] = -total;
+	}
 
 	return {
 		winner: claimantSeat,
@@ -906,6 +957,8 @@ async function applyAiCalls(
 			players[seat].hand = sortHand(player.hand.filter((t) => !ids.has(t.id)));
 			players[seat].melds = [...player.melds, meld];
 			players[discarderSeat].anyDiscardCalled = true;
+			players[seat].paoSeat =
+				paoLiableSeat(players[seat].melds, discarderSeat) ?? players[seat].paoSeat;
 			for (const p of players) p.isIppatsu = false;
 			const postKan = pushEvent(
 				{ ...state, players, anyCallMadeThisRound: true },
@@ -939,6 +992,8 @@ async function applyAiCalls(
 				ponTiles[1].code
 			]);
 			players[discarderSeat].anyDiscardCalled = true;
+			players[seat].paoSeat =
+				paoLiableSeat(players[seat].melds, discarderSeat) ?? players[seat].paoSeat;
 			for (const p of players) p.isIppatsu = false;
 			return pushEvent(
 				{ ...state, players, anyCallMadeThisRound: true, phase: 'ai_turn', currentSeat: seat },
@@ -1125,6 +1180,8 @@ export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameStat
 		handTiles[1].code
 	]);
 	players[state.lastDiscardSeat!].anyDiscardCalled = true;
+	players[0].paoSeat =
+		paoLiableSeat(players[0].melds, state.lastDiscardSeat!) ?? players[0].paoSeat;
 
 	const called = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -1273,6 +1330,8 @@ export async function humanClaimDaiminkan(
 	players[0].hand = sortHand(player.hand.filter((t) => !handTileIds.has(t.id)));
 	players[0].melds = [...player.melds, meld];
 	players[state.lastDiscardSeat!].anyDiscardCalled = true;
+	players[0].paoSeat =
+		paoLiableSeat(players[0].melds, state.lastDiscardSeat!) ?? players[0].paoSeat;
 
 	const postKan = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -1576,7 +1635,8 @@ function clonePlayers(state: GameState): [PlayerState, PlayerState, PlayerState,
 		isFuriten: p.isFuriten,
 		isTempFuriten: p.isTempFuriten,
 		kuikaeForbidden: [...p.kuikaeForbidden],
-		anyDiscardCalled: p.anyDiscardCalled
+		anyDiscardCalled: p.anyDiscardCalled,
+		paoSeat: p.paoSeat
 	})) as [PlayerState, PlayerState, PlayerState, PlayerState];
 }
 

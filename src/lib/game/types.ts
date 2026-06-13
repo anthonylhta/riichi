@@ -36,6 +36,10 @@ export interface PlayerState {
 	// True once any of this seat's discards has been claimed (pon/chi/kan) by
 	// another seat — disqualifies the seat from nagashi mangan at exhaustive draw.
 	anyDiscardCalled: boolean;
+	// Pao (sekinin barai): the seat that fed this player the completing call of a
+	// daisangen (3rd dragon) or daisuushii (4th wind), making that feeder liable
+	// for the yakuman. null when no pao liability is attached.
+	paoSeat: Seat | null;
 }
 
 export type GamePhase =

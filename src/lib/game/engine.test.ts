@@ -31,7 +31,9 @@ import {
 	getPlayerKanOptions,
 	kuikaeForbiddenCodes,
 	canDeclareKyuushu,
-	humanDeclareKyuushu
+	humanDeclareKyuushu,
+	checkTsumo,
+	checkRon
 } from './engine';
 import { chooseDiscard, getShanten, riichiAnkanKeepsWaits, shouldDeclareRiichi } from './ai';
 import { checkWin } from './scoring';
@@ -61,6 +63,7 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 		isTempFuriten: false,
 		kuikaeForbidden: [],
 		anyDiscardCalled: false,
+		paoSeat: null,
 		...overrides
 	};
 }
@@ -2187,5 +2190,121 @@ describe('kyuushu kyuuhai', () => {
 			] as GameState['players']
 		});
 		expect(canDeclareKyuushu(state)).toBe(false);
+	});
+});
+
+// ─── pao (sekinin barai) ─────────────────────────────────────────────────────
+
+describe('pao (sekinin barai)', () => {
+	const DAISANGEN = {
+		isWin: true,
+		han: 13,
+		fu: 0,
+		score: 32000,
+		yaku: [{ name: 'Daisangen', han: 13 }],
+		yakuNames: ['Daisangen']
+	};
+
+	function ponMeld(code: number, base: number, from: Seat): Meld {
+		return {
+			type: 'pon',
+			tiles: [tile(code, base), tile(code, base + 1), tile(code, base + 2)],
+			calledFrom: from
+		};
+	}
+
+	it('a fed 3rd dragon pon attaches pao to the feeder', () => {
+		// Human already holds Haku + Hatsu pons; pons the Chun (code 34) fed by seat 2.
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(34, 90),
+			lastDiscardSeat: 2,
+			players: [
+				makePlayer(0, {
+					hand: [tile(34, 1), tile(34, 2)],
+					melds: [ponMeld(32, 10, 1), ponMeld(33, 20, 3)]
+				}),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const after = humanClaimPon(state, [tile(34, 1), tile(34, 2)]);
+		expect(after.players[0].paoSeat).toBe(2);
+	});
+
+	it('pao tsumo: the liable seat pays the whole yakuman', async () => {
+		vi.mocked(checkWin).mockResolvedValue(DAISANGEN);
+		const state = makeState({
+			dealer: 0,
+			honba: 0,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: Array.from({ length: 14 }, (_, i) => tile(34, i + 1)), paoSeat: 1 }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await checkTsumo(state, 2);
+		expect(result?.pointChanges).toEqual([0, -32000, 32000, 0]);
+	});
+
+	it('pao ron off a different discarder: discarder and pao seat split the value', async () => {
+		vi.mocked(checkWin).mockResolvedValue(DAISANGEN);
+		const state = makeState({
+			honba: 0,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: Array.from({ length: 13 }, (_, i) => tile(34, i + 1)), paoSeat: 1 }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		// Seat 2 rons seat 3's discard; seat 1 is the pao seat.
+		const result = await checkRon(state, 2, tile(34, 99), 3);
+		expect(result?.pointChanges).toEqual([0, -16000, 32000, -16000]);
+	});
+
+	it('pao ron where the pao seat IS the discarder: they pay all', async () => {
+		vi.mocked(checkWin).mockResolvedValue(DAISANGEN);
+		const state = makeState({
+			honba: 0,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: Array.from({ length: 13 }, (_, i) => tile(34, i + 1)), paoSeat: 1 }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await checkRon(state, 2, tile(34, 99), 1);
+		expect(result?.pointChanges).toEqual([0, -32000, 32000, 0]);
+	});
+
+	it('no pao when the win is not the attached yakuman', async () => {
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: true,
+			han: 3,
+			fu: 30,
+			score: 3900,
+			yaku: [{ name: 'Honitsu', han: 3 }],
+			yakuNames: ['Honitsu']
+		});
+		const state = makeState({
+			honba: 0,
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: Array.from({ length: 13 }, (_, i) => tile(5, i + 1)), paoSeat: 1 }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await checkRon(state, 2, tile(5, 99), 3);
+		// Ordinary ron: the discarder (seat 3) pays the whole thing.
+		expect(result?.pointChanges).toEqual([0, 0, 3900, -3900]);
 	});
 });
