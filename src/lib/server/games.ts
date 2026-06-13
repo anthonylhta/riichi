@@ -6,6 +6,7 @@ import type { RoundRecord } from '$lib/game/review';
 import type { ReplayLog } from '$lib/game/replay';
 import type { GameStats } from '$lib/game/profile';
 import type { GameDetail, GameListItem } from '$lib/game/history';
+import type { ReviewedDealIn } from '$lib/game/tileReview';
 
 export interface SavedGameInput {
 	finalScores: [number, number, number, number];
@@ -92,7 +93,8 @@ export async function getGame(userId: number, gameId: number): Promise<GameDetai
 			winner: games.winner,
 			liked: games.liked,
 			rounds: games.rounds,
-			hasReplay: sql<boolean>`${games.replay} is not null`
+			hasReplay: sql<boolean>`${games.replay} is not null`,
+			tileReview: games.tileReview
 		})
 		.from(games)
 		.where(and(eq(games.id, gameId), eq(games.userId, userId)))
@@ -108,8 +110,42 @@ export async function getGame(userId: number, gameId: number): Promise<GameDetai
 		winner: r.winner,
 		liked: r.liked,
 		rounds: r.rounds as RoundRecord[],
-		hasReplay: r.hasReplay
+		hasReplay: r.hasReplay,
+		tileReview: (r.tileReview as ReviewedDealIn[] | null) ?? null
 	};
+}
+
+// The cached tile review for an owned game. `found: false` means the game does
+// not exist OR belongs to someone else (indistinguishable on purpose, like
+// getGame); `review: null` means owned but not yet reviewed.
+export async function getGameTileReview(
+	userId: number,
+	gameId: number
+): Promise<{ found: boolean; review: ReviewedDealIn[] | null }> {
+	const db = getDb();
+	const rows = await db
+		.select({ tileReview: games.tileReview })
+		.from(games)
+		.where(and(eq(games.id, gameId), eq(games.userId, userId)))
+		.limit(1);
+	if (!rows.length) return { found: false, review: null };
+	return { found: true, review: (rows[0].tileReview as ReviewedDealIn[] | null) ?? null };
+}
+
+// Cache the server-authored verdicts on the game row. Ownership in the WHERE,
+// like setGameLiked; returns false when no owned row matched.
+export async function saveGameTileReview(
+	userId: number,
+	gameId: number,
+	review: ReviewedDealIn[]
+): Promise<boolean> {
+	const db = getDb();
+	const updated = await db
+		.update(games)
+		.set({ tileReview: review })
+		.where(and(eq(games.id, gameId), eq(games.userId, userId)))
+		.returning({ id: games.id });
+	return updated.length > 0;
 }
 
 // A saved game's move log, ownership-checked like getGame. Null when the game
