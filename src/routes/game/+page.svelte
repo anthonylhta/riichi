@@ -33,6 +33,8 @@
 	import GameHeader from '$lib/components/game/GameHeader.svelte';
 	import ExitConfirmPanel from '$lib/components/game/ExitConfirmPanel.svelte';
 	import DevPanel from '$lib/components/game/DevPanel.svelte';
+	import ClaimPanel from '$lib/components/game/ClaimPanel.svelte';
+	import HelperPanel from '$lib/components/game/HelperPanel.svelte';
 	import { Show, SignInButton } from 'svelte-clerk';
 
 	// Post-game overview (Claude) — generated on demand from the flagged moments.
@@ -491,63 +493,22 @@
 
 			<!-- Claim decision — non-blocking docked panel; the board stays visible -->
 			{#if $gameState.phase === 'claim_decision'}
-				<div class="claim-panel">
-					<div class="claim-head">
-						{#if $gameState.lastDiscard}
-							<Tile tile={$gameState.lastDiscard} variant="meld" />
-						{/if}
-						<span class="claim-title">
-							Claim {seatNames[$gameState.lastDiscardSeat ?? 0]}'s discard?
-						</span>
-					</div>
-					<div class="claim-actions">
-						{#if $gameState.pendingRon}
-							<button class="claim-btn btn-ron" onclick={declareRon}>Ron 栄和</button>
-						{/if}
-						{#each $gameState.claimOptions ?? [] as option, oi (oi)}
-							{#if option.type === 'kan'}
-								<button class="claim-btn btn-kan" onclick={() => claimDaiminkan(option.handTiles)}>
-									Kan 槓
-								</button>
-							{:else if option.type === 'pon'}
-								<button class="claim-btn btn-pon" onclick={() => claimPon(option.handTiles)}>
-									Pon ポン
-								</button>
-							{:else if option.type === 'chi'}
-								<button class="claim-btn btn-chi" onclick={() => claimChi(option.handTiles)}>
-									Chi チー
-									<span class="chi-tiles">
-										{tileLabel(option.handTiles[0].code)}·{tileLabel(option.handTiles[1].code)}
-									</span>
-								</button>
-							{/if}
-						{/each}
-						<button class="claim-btn btn-pass" onclick={passClaim}>Pass スキップ</button>
-					</div>
-				</div>
+				<ClaimPanel
+					discardTile={$gameState.lastDiscard}
+					discarderName={seatNames[$gameState.lastDiscardSeat ?? 0]}
+					canRon={!!$gameState.pendingRon}
+					claimOptions={$gameState.claimOptions ?? []}
+					onRon={declareRon}
+					onDaiminkan={claimDaiminkan}
+					onPon={claimPon}
+					onChi={claimChi}
+					onPass={passClaim}
+				/>
 			{/if}
 
 			<!-- In-round AI helper — non-blocking docked panel -->
 			{#if helperAdvice || helperError}
-				<div class="helper-panel">
-					<div class="helper-head">
-						<span class="helper-title">助言 — Coach</span>
-						<button class="helper-close" onclick={dismissHelper} aria-label="Dismiss">✕</button>
-					</div>
-					<div class="helper-body">
-						{#if helperError}
-							<p class="helper-error">{helperError}</p>
-						{:else if helperAdvice}
-							<div class="helper-discard">
-								Discard <strong>{helperAdvice.discard}</strong>
-							</div>
-							<p class="helper-reason">{helperAdvice.reasoning}</p>
-							{#if helperAdvice.plan}
-								<p class="helper-plan"><span class="helper-lbl">Plan</span> {helperAdvice.plan}</p>
-							{/if}
-						{/if}
-					</div>
-				</div>
+				<HelperPanel advice={helperAdvice} error={helperError} onDismiss={dismissHelper} />
 			{/if}
 		</div>
 		<!-- /stage -->
@@ -1257,177 +1218,6 @@
 	.helper-btn:disabled {
 		opacity: 0.7;
 		cursor: default;
-	}
-
-	/* ── In-round helper panel — non-blocking, docked bottom-left of the stage ── */
-	.helper-panel {
-		position: absolute;
-		left: calc(var(--u) * 3);
-		bottom: calc(var(--u) * 18);
-		z-index: 40;
-		width: calc(var(--u) * 36);
-		max-width: 90vw;
-		/* Cap the height so a long response can never grow the panel past the close
-		   button — the head stays pinned and the body scrolls inside (see UI_09). */
-		max-height: calc(var(--u) * 40);
-		display: flex;
-		flex-direction: column;
-		gap: calc(var(--u) * 0.8);
-		padding: calc(var(--u) * 1.4) calc(var(--u) * 1.6);
-		background: rgba(16, 20, 26, 0.97);
-		border: 1px solid #2f3b4c;
-		border-left: 3px solid #3f6f9e;
-		border-radius: calc(var(--u) * 1.2);
-		box-shadow: 0 calc(var(--u) * 1) calc(var(--u) * 3) rgba(0, 0, 0, 0.6);
-	}
-	.helper-head {
-		flex-shrink: 0;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: calc(var(--u) * 1);
-	}
-	.helper-body {
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-		gap: calc(var(--u) * 0.8);
-		min-height: 0;
-	}
-	.helper-title {
-		font-family: 'Noto Serif JP', serif;
-		font-size: calc(var(--u) * 1.6);
-		color: #9fc3e6;
-	}
-	.helper-close {
-		background: none;
-		border: none;
-		color: #6a7686;
-		cursor: pointer;
-		font-size: calc(var(--u) * 1.6);
-		line-height: 1;
-		padding: 0;
-	}
-	.helper-close:hover {
-		color: #cfd8e2;
-	}
-	.helper-discard {
-		font-size: calc(var(--u) * 1.7);
-		color: #cfc7bb;
-	}
-	.helper-discard strong {
-		color: #fff;
-		font-size: calc(var(--u) * 2);
-	}
-	.helper-reason {
-		margin: 0;
-		font-size: calc(var(--u) * 1.5);
-		line-height: 1.45;
-		color: #b7ada0;
-	}
-	.helper-plan {
-		margin: 0;
-		font-size: calc(var(--u) * 1.45);
-		color: #97b8d6;
-	}
-	.helper-lbl {
-		font-size: calc(var(--u) * 1.2);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: #6a7686;
-	}
-	.helper-error {
-		margin: 0;
-		font-size: calc(var(--u) * 1.5);
-		color: #c41e3a;
-	}
-
-	/* ── Claim panel — non-blocking, docked bottom-right of the stage ───── */
-	.claim-panel {
-		position: absolute;
-		right: calc(var(--u) * 3);
-		bottom: calc(var(--u) * 18);
-		z-index: 40;
-		display: flex;
-		flex-direction: column;
-		gap: calc(var(--u) * 1);
-		padding: calc(var(--u) * 1.4) calc(var(--u) * 1.6);
-		background: rgba(20, 18, 16, 0.96);
-		border: 1px solid #3a342c;
-		border-radius: calc(var(--u) * 1.2);
-		box-shadow: 0 calc(var(--u) * 1) calc(var(--u) * 3) rgba(0, 0, 0, 0.6);
-	}
-
-	.claim-head {
-		display: flex;
-		align-items: center;
-		gap: calc(var(--u) * 1);
-	}
-
-	.claim-title {
-		font-size: calc(var(--u) * 1.7);
-		color: #cfc7bb;
-		font-weight: 600;
-	}
-
-	.claim-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: calc(var(--u) * 0.8);
-		justify-content: flex-end;
-	}
-
-	.claim-btn {
-		padding: calc(var(--u) * 0.8) calc(var(--u) * 1.4);
-		border: none;
-		border-radius: calc(var(--u) * 0.6);
-		cursor: pointer;
-		font-size: calc(var(--u) * 1.7);
-		font-weight: 600;
-		transition: opacity 0.15s;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: calc(var(--u) * 0.2);
-	}
-
-	.claim-btn:hover {
-		opacity: 0.85;
-	}
-
-	.btn-ron {
-		background: #c41e3a;
-		color: #fff;
-		min-width: calc(var(--u) * 9);
-	}
-
-	.btn-pon {
-		background: #b87820;
-		color: #fff;
-		min-width: calc(var(--u) * 9);
-	}
-
-	.btn-chi {
-		background: #1a6e30;
-		color: #fff;
-		min-width: calc(var(--u) * 9);
-	}
-
-	.chi-tiles {
-		font-size: calc(var(--u) * 1.3);
-		opacity: 0.85;
-	}
-
-	.btn-kan {
-		background: #4a2a80;
-		color: #fff;
-		min-width: calc(var(--u) * 9);
-	}
-
-	.btn-pass {
-		background: #333;
-		color: #aaa;
-		min-width: calc(var(--u) * 9);
 	}
 
 	/* ── Overlays ──────────────────────────────────────────────────────── */
