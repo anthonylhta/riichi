@@ -447,6 +447,16 @@ async function aiCheckRon(
 	return ron;
 }
 
+// Robbing an ankan (chankan on a concealed kan) is legal for KOKUSHI MUSOU ONLY —
+// unlike a kakan, which any wait can rob. A normal wait that happens to complete
+// on the kanned tile must NOT win here, so we keep the ron only when the hand is
+// kokushi (single- or 13-sided wait). Furiten is enforced by the caller's ron path
+// (aiCheckRon for AI, the human's flags), so this is a pure post-filter on the win.
+function asKokushiRob(ron: RoundResult | null): RoundResult | null {
+	if (!ron) return null;
+	return ron.yaku.some((y) => y.name.startsWith('Kokushi')) ? ron : null;
+}
+
 export function applyRoundResult(
 	state: GameState,
 	result: RoundResult,
@@ -1049,7 +1059,17 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 	if (!getAnkanOptions(player).includes(code)) return state;
 	const matching = player.hand.filter((t) => t.code === code);
 
-	const players = clonePlayers(state);
+	// The ankan is recorded before the chankan-rob check — a robbed kan still
+	// happened, and the record shows the ankan followed by the ron. Only kokushi
+	// may rob an ankan.
+	const declared = pushEvent(state, { type: 'ankan', seat: 0, consumed: matching.slice(0, 4) });
+	const robbedTile = matching[0];
+	for (let s = 1; s < 4; s++) {
+		const ron = asKokushiRob(await aiCheckRon(declared, s as Seat, robbedTile, 0, true));
+		if (ron) return applyRoundResult(declared, ron, robbedTile);
+	}
+
+	const players = clonePlayers(declared);
 	players[0].hand = sortHand(player.hand.filter((t) => t.code !== code));
 	players[0].melds = [
 		...player.melds,
@@ -1058,10 +1078,7 @@ export async function humanDeclareAnkan(state: GameState, code: TileCode): Promi
 	// ANY call breaks ippatsu for everyone — including the kan declarer's own.
 	// (Riichi → ankan → rinshan tsumo scores rinshan only, never ippatsu.)
 	for (const p of players) p.isIppatsu = false;
-	const postKan = pushEvent(
-		{ ...state, players, anyCallMadeThisRound: true },
-		{ type: 'ankan', seat: 0, consumed: matching.slice(0, 4) }
-	);
+	const postKan = { ...declared, players, anyCallMadeThisRound: true };
 
 	const drawn = drawRinshan(postKan, 0, true);
 	const tsumo = await checkTsumo(drawn, 0, true);
@@ -1251,6 +1268,25 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 			const code = ankanCodes[0];
 			const aiPlayer = s.players[seat];
 			const matching = aiPlayer.hand.filter((t) => t.code === code);
+			// Record the ankan before the chankan-rob check — only kokushi may rob
+			// an ankan, by any other seat (the human via their furiten flags).
+			s = pushEvent(s, { type: 'ankan', seat, consumed: matching.slice(0, 4) });
+			const robbedTile = matching[0];
+			let robbed: GameState | null = null;
+			for (let offset = 1; offset <= 3; offset++) {
+				const claimant = ((seat + offset) % 4) as Seat;
+				const claimer = s.players[claimant];
+				const ron = claimer.isHuman
+					? claimer.isFuriten || claimer.isTempFuriten
+						? null
+						: asKokushiRob(await checkRon(s, 0, robbedTile, seat, true))
+					: asKokushiRob(await aiCheckRon(s, claimant, robbedTile, seat, true));
+				if (ron) {
+					robbed = applyRoundResult(s, ron, robbedTile);
+					break;
+				}
+			}
+			if (robbed) return robbed;
 			const players = clonePlayers(s);
 			players[seat].hand = sortHand(aiPlayer.hand.filter((t) => t.code !== code));
 			players[seat].melds = [
@@ -1259,10 +1295,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 			];
 			// Own kan breaks own ippatsu too — same rule as the human ankan path.
 			for (const p of players) p.isIppatsu = false;
-			const postKan = pushEvent(
-				{ ...s, players, anyCallMadeThisRound: true },
-				{ type: 'ankan', seat, consumed: matching.slice(0, 4) }
-			);
+			const postKan = { ...s, players, anyCallMadeThisRound: true };
 			s = drawRinshan(postKan, seat, true);
 			const kanTsumo = await checkTsumo(s, seat, true);
 			if (kanTsumo) return applyRoundResult(s, kanTsumo);

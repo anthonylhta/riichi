@@ -1855,3 +1855,68 @@ describe('kuikae — engine wiring', () => {
 		expect(blocked).toBe(afterPon);
 	});
 });
+
+// ─── kokushi can rob an ankan ────────────────────────────────────────────────
+
+describe('kokushi rob of an ankan', () => {
+	// A North (code 30, an honor → a kokushi tile) ankan, with 10 filler tiles to
+	// make the declaring hand a legal 14.
+	function ankanState(): GameState {
+		const hand = [
+			tile(30, 1),
+			tile(30, 2),
+			tile(30, 3),
+			tile(30, 4),
+			...Array.from({ length: 10 }, (_, i) => tile((i % 9) + 1, 10 + i))
+		];
+		return makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			players: [
+				makePlayer(0, { hand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+	}
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+	});
+
+	it('a kokushi wait robs the ankan — the round ends with that seat winning', async () => {
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: true,
+			han: 13,
+			fu: 0,
+			score: 32000,
+			yaku: [{ name: 'Kokushi (13-sided)', han: 13 }],
+			yakuNames: ['Kokushi (13-sided)']
+		});
+
+		const result = await humanDeclareAnkan(ankanState(), 30);
+		expect(result.phase).toBe('round_end');
+		expect(result.roundResult?.winner).toBe(1);
+		expect(result.roundResult?.winType).toBe('ron');
+		// The kan never made it onto the declarer's hand — it was robbed.
+		expect(result.players[0].melds).toHaveLength(0);
+	});
+
+	it('a non-kokushi win does NOT rob the ankan — the kan stands', async () => {
+		// A plausible-but-illegal robber: a tanki on North that is not kokushi.
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: true,
+			han: 2,
+			fu: 40,
+			score: 2600,
+			yaku: [{ name: 'Toitoi', han: 2 }],
+			yakuNames: ['Toitoi']
+		});
+
+		const result = await humanDeclareAnkan(ankanState(), 30);
+		expect(result.roundResult).toBeNull();
+		expect(result.players[0].melds).toHaveLength(1);
+		expect(result.players[0].melds[0].type).toBe('ankan');
+	});
+});
