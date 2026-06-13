@@ -3,7 +3,7 @@
 	import { SEAT_NAMES, roundTag, summarize } from '$lib/game/review';
 	import { placeLabel } from '$lib/game/history';
 	import { tileText } from '$lib/game/tiles';
-	import type { DealInMoment, DealInVerdict, TileReviewResult } from '$lib/game/tileReview';
+	import type { ReviewedDealIn } from '$lib/game/tileReview';
 
 	let { data } = $props();
 
@@ -56,20 +56,23 @@
 
 	// Tile-level review: replay the game client-side, extract the deal-in
 	// moments (≤3, pure — see $lib/game/tileReview), send only those to Claude,
-	// and pin each verdict under its round card.
+	// and pin each verdict under its round card. Verdicts are cached on the
+	// game row (ADR 0055): a previously reviewed game renders them straight
+	// from the page load, and the endpoint returns the cache on any re-post.
 	let tileBusy = $state(false);
 	let tileError = $state('');
-	let tileVerdicts = $state<Record<
-		string,
-		{ moment: DealInMoment; verdict: DealInVerdict }
-	> | null>(null);
+	let runReviews = $state<ReviewedDealIn[] | null>(null);
+	const reviews = $derived(runReviews ?? data.game?.tileReview ?? null);
+	const verdictByHand = $derived(
+		reviews ? Object.fromEntries(reviews.map((r) => [`${r.round}-${r.honba}`, r])) : null
+	);
 
 	const hasDealIns = $derived(
 		data.game?.rounds.some((r) => r.outcome === 'ron' && r.loser === 0) ?? false
 	);
 
 	async function runTileReview(gameId: number) {
-		if (tileBusy || tileVerdicts) return;
+		if (tileBusy || reviews) return;
 		tileBusy = true;
 		tileError = '';
 		try {
@@ -85,19 +88,13 @@
 				tileError = 'No reviewable deal-ins in this game.';
 				return;
 			}
-			const reviewRes = await fetch('/api/tile-review', {
+			const reviewRes = await fetch(`/api/games/${gameId}/tile-review`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ moments })
 			});
 			if (!reviewRes.ok) throw new Error(`review failed (${reviewRes.status})`);
-			const { verdicts } = (await reviewRes.json()) as TileReviewResult;
-			// (round, honba) is unique per hand, so it keys the verdict to its card.
-			const byHand: Record<string, { moment: DealInMoment; verdict: DealInVerdict }> = {};
-			moments.forEach((m, i) => {
-				byHand[`${m.round}-${m.honba}`] = { moment: m, verdict: verdicts[i] };
-			});
-			tileVerdicts = byHand;
+			runReviews = ((await reviewRes.json()) as { reviews: ReviewedDealIn[] }).reviews;
 		} catch (e) {
 			console.error('tile review failed', e);
 			tileError = 'Tile review unavailable right now.';
@@ -182,11 +179,11 @@
 					<button
 						class="tile-review-btn"
 						onclick={() => runTileReview(g.id)}
-						disabled={tileBusy || tileVerdicts !== null}
+						disabled={tileBusy || reviews !== null}
 					>
 						{tileBusy
 							? 'Analyzing your deal-ins…'
-							: tileVerdicts
+							: reviews
 								? 'Reviewed ✓'
 								: 'Tile review 牌譜検討'}
 					</button>
@@ -211,7 +208,7 @@
 		<section class="rounds">
 			{#each g.rounds as r, i (i)}
 				{@const m = summarize(r)}
-				{@const tr = tileVerdicts?.[`${r.round}-${r.honba}`]}
+				{@const tr = verdictByHand?.[`${r.round}-${r.honba}`]}
 				<article class="round" data-kind={m.kind}>
 					<div class="round-head">
 						<span class="round-tag">{roundTag(r.round, r.honba)}</span>
@@ -225,16 +222,16 @@
 					</div>
 					<p class="round-text">{m.text}</p>
 					{#if tr}
-						<div class="tile-verdict" data-verdict={tr.verdict.verdict}>
+						<div class="tile-verdict" data-verdict={tr.verdict}>
 							<div class="verdict-head">
-								<span class="verdict-chip">{tr.verdict.verdict}</span>
+								<span class="verdict-chip">{tr.verdict}</span>
 								<span class="verdict-tile">
-									dealt in with {tileText(tr.moment.dealInTile)}{tr.moment.forcedByRiichi
+									dealt in with {tileText(tr.dealInTile)}{tr.forcedByRiichi
 										? ' (forced — you were in riichi)'
 										: ''}
 								</span>
 							</div>
-							<p class="verdict-advice">{tr.verdict.advice}</p>
+							<p class="verdict-advice">{tr.advice}</p>
 						</div>
 					{/if}
 					<div class="round-scores">
