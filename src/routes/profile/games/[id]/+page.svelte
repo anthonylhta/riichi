@@ -2,6 +2,8 @@
 	import { SignInButton } from 'svelte-clerk';
 	import { SEAT_NAMES, roundTag, summarize } from '$lib/game/review';
 	import { placeLabel } from '$lib/game/history';
+	import { tileText } from '$lib/game/tiles';
+	import type { DealInMoment, DealInVerdict, TileReviewResult } from '$lib/game/tileReview';
 
 	let { data } = $props();
 
@@ -49,6 +51,58 @@
 			exportError = 'Export failed — the replay could not be re-run.';
 		} finally {
 			exportBusy = null;
+		}
+	}
+
+	// Tile-level review: replay the game client-side, extract the deal-in
+	// moments (≤3, pure — see $lib/game/tileReview), send only those to Claude,
+	// and pin each verdict under its round card.
+	let tileBusy = $state(false);
+	let tileError = $state('');
+	let tileVerdicts = $state<Record<
+		string,
+		{ moment: DealInMoment; verdict: DealInVerdict }
+	> | null>(null);
+
+	const hasDealIns = $derived(
+		data.game?.rounds.some((r) => r.outcome === 'ron' && r.loser === 0) ?? false
+	);
+
+	async function runTileReview(gameId: number) {
+		if (tileBusy || tileVerdicts) return;
+		tileBusy = true;
+		tileError = '';
+		try {
+			const [res, { replayGame }, { dealInMoments }] = await Promise.all([
+				fetch(`/api/games/${gameId}/replay`),
+				import('$lib/game/replay'),
+				import('$lib/game/tileReview')
+			]);
+			if (!res.ok) throw new Error(`replay fetch failed (${res.status})`);
+			const { final } = await replayGame(await res.json());
+			const moments = dealInMoments(final.events);
+			if (moments.length === 0) {
+				tileError = 'No reviewable deal-ins in this game.';
+				return;
+			}
+			const reviewRes = await fetch('/api/tile-review', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ moments })
+			});
+			if (!reviewRes.ok) throw new Error(`review failed (${reviewRes.status})`);
+			const { verdicts } = (await reviewRes.json()) as TileReviewResult;
+			// (round, honba) is unique per hand, so it keys the verdict to its card.
+			const byHand: Record<string, { moment: DealInMoment; verdict: DealInVerdict }> = {};
+			moments.forEach((m, i) => {
+				byHand[`${m.round}-${m.honba}`] = { moment: m, verdict: verdicts[i] };
+			});
+			tileVerdicts = byHand;
+		} catch (e) {
+			console.error('tile review failed', e);
+			tileError = 'Tile review unavailable right now.';
+		} finally {
+			tileBusy = false;
 		}
 	}
 
@@ -122,6 +176,26 @@
 						custom log (you are seat 0){/if}
 				</span>
 			</p>
+
+			{#if hasDealIns}
+				<div class="tile-review-bar">
+					<button
+						class="tile-review-btn"
+						onclick={() => runTileReview(g.id)}
+						disabled={tileBusy || tileVerdicts !== null}
+					>
+						{tileBusy
+							? 'Analyzing your deal-ins…'
+							: tileVerdicts
+								? 'Reviewed ✓'
+								: 'Tile review 牌譜検討'}
+					</button>
+					<span class="export-sub">
+						{#if tileError}{tileError}{:else}Claude judges the exact tiles you dealt in with —
+							verdicts appear on the rounds below{/if}
+					</span>
+				</div>
+			{/if}
 		{/if}
 
 		<section class="standings">
@@ -137,6 +211,7 @@
 		<section class="rounds">
 			{#each g.rounds as r, i (i)}
 				{@const m = summarize(r)}
+				{@const tr = tileVerdicts?.[`${r.round}-${r.honba}`]}
 				<article class="round" data-kind={m.kind}>
 					<div class="round-head">
 						<span class="round-tag">{roundTag(r.round, r.honba)}</span>
@@ -149,6 +224,19 @@
 						</span>
 					</div>
 					<p class="round-text">{m.text}</p>
+					{#if tr}
+						<div class="tile-verdict" data-verdict={tr.verdict.verdict}>
+							<div class="verdict-head">
+								<span class="verdict-chip">{tr.verdict.verdict}</span>
+								<span class="verdict-tile">
+									dealt in with {tileText(tr.moment.dealInTile)}{tr.moment.forcedByRiichi
+										? ' (forced — you were in riichi)'
+										: ''}
+								</span>
+							</div>
+							<p class="verdict-advice">{tr.verdict.advice}</p>
+						</div>
+					{/if}
 					<div class="round-scores">
 						{#each r.scoresAfter as score, seat (seat)}
 							<span class="rs" class:you={seat === 0}>{SEAT_NAMES[seat]} {score}</span>
@@ -291,6 +379,80 @@
 	.export-sub {
 		font-size: 0.72rem;
 		color: #5a5248;
+	}
+
+	/* Tile review — the button bar above the rounds, verdicts pinned in cards */
+	.tile-review-bar {
+		margin: 0.2rem 0 0;
+		text-align: center;
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		align-items: center;
+	}
+	.tile-review-btn {
+		padding: 0.5rem 1.6rem;
+		background: linear-gradient(180deg, #c41e3a, #9c1730);
+		color: #fff;
+		border: none;
+		border-radius: 6px;
+		font-size: 0.9rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.tile-review-btn:hover:not(:disabled) {
+		filter: brightness(1.08);
+	}
+	.tile-review-btn:disabled {
+		opacity: 0.55;
+		cursor: default;
+	}
+
+	.tile-verdict {
+		border: 1px solid #2a2724;
+		border-radius: 6px;
+		background: rgba(0, 0, 0, 0.25);
+		padding: 0.55rem 0.7rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+	.verdict-head {
+		display: flex;
+		align-items: baseline;
+		gap: 0.55rem;
+	}
+	.verdict-chip {
+		font-size: 0.68rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		padding: 0.12rem 0.5rem;
+		border-radius: 999px;
+		background: #3a3530;
+		color: #cfc7bb;
+	}
+	.tile-verdict[data-verdict='avoidable'] .verdict-chip {
+		background: #c41e3a;
+		color: #fff;
+	}
+	.tile-verdict[data-verdict='justified'] .verdict-chip {
+		background: #8a6d1f;
+		color: #fff;
+	}
+	.tile-verdict[data-verdict='unlucky'] .verdict-chip {
+		background: #2e5a3a;
+		color: #d9e8dd;
+	}
+	.verdict-tile {
+		font-size: 0.78rem;
+		color: #8a8278;
+	}
+	.verdict-advice {
+		margin: 0;
+		font-size: 0.86rem;
+		line-height: 1.45;
+		color: #cfc7bb;
 	}
 
 	/* Final standings */
