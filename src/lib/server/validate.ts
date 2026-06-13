@@ -12,6 +12,7 @@ import type { HelperMeld, HelperSeatView, HelperView } from '$lib/game/helper';
 import type { ReviewMoment, ReviewPayload, RoundRecord } from '$lib/game/review';
 import type { ReplayInput, ReplayLog } from '$lib/game/replay';
 import type { GameTile } from '$lib/game/tiles';
+import type { DealInMoment, DealInSeat } from '$lib/game/tileReview';
 
 // Generous upper bounds for a legal game state.
 const MAX_DISCARDS = 30; // a single pond can't realistically exceed ~24
@@ -314,6 +315,121 @@ function replayInput(v: unknown): ReplayInput | null {
 		default:
 			return null;
 	}
+}
+
+// ── Tile review (/api/tile-review) ──────────────────────────────────────────
+
+const MAX_TILE_MOMENTS = 3;
+
+function dealInSeat(v: unknown): DealInSeat | null {
+	if (typeof v !== 'object' || v === null) return null;
+	const s = v as Record<string, unknown>;
+	const discards = tileArray(s.discards, MAX_DISCARDS);
+	const seatMelds = melds(s.melds);
+	if (
+		!isInt(s.seat, 0, 3) ||
+		typeof s.isYou !== 'boolean' ||
+		typeof s.isRiichi !== 'boolean' ||
+		!isScore(s.score) ||
+		!discards ||
+		!seatMelds
+	) {
+		return null;
+	}
+	return {
+		seat: s.seat,
+		isYou: s.isYou,
+		isRiichi: s.isRiichi,
+		score: s.score,
+		discards,
+		melds: seatMelds
+	};
+}
+
+function dealInMoment(v: unknown): DealInMoment | null {
+	if (typeof v !== 'object' || v === null) return null;
+	const m = v as Record<string, unknown>;
+	const doraIndicators = tileArray(m.doraIndicators, MAX_DORA);
+	const hand = tileArray(m.hand, 14);
+	const ownMelds = melds(m.melds);
+	const safeTiles = tileArray(m.safeTiles, 14);
+	if (
+		!isInt(m.round, 1, 8) ||
+		!isInt(m.honba, 0, 30) ||
+		!isInt(m.turn, 1, 40) ||
+		!isInt(m.tilesLeft, 0, 70) ||
+		!doraIndicators ||
+		!hand ||
+		hand.length === 0 ||
+		!ownMelds ||
+		!isTile(m.dealInTile) ||
+		typeof m.forcedByRiichi !== 'boolean' ||
+		!safeTiles ||
+		typeof m.winner !== 'object' ||
+		m.winner === null ||
+		!Array.isArray(m.seats) ||
+		m.seats.length !== 4
+	) {
+		return null;
+	}
+
+	const w = m.winner as Record<string, unknown>;
+	if (
+		!isInt(w.seat, 1, 3) ||
+		!isInt(w.han, 0, 200) ||
+		!isInt(w.fu, 0, 200) ||
+		!isScore(w.score) ||
+		!Array.isArray(w.yaku) ||
+		w.yaku.length > MAX_YAKU
+	) {
+		return null;
+	}
+	const yaku: { name: string; han: number }[] = [];
+	for (const y of w.yaku) {
+		if (typeof y !== 'object' || y === null) return null;
+		const { name, han } = y as Record<string, unknown>;
+		if (typeof name !== 'string' || name.length > MAX_YAKU_NAME || !isInt(han, 0, 200)) return null;
+		yaku.push({ name, han });
+	}
+
+	const seats: DealInSeat[] = [];
+	for (const s of m.seats) {
+		const seat = dealInSeat(s);
+		if (!seat) return null;
+		seats.push(seat);
+	}
+
+	return {
+		round: m.round,
+		honba: m.honba,
+		turn: m.turn,
+		tilesLeft: m.tilesLeft,
+		doraIndicators,
+		hand,
+		melds: ownMelds,
+		dealInTile: m.dealInTile,
+		forcedByRiichi: m.forcedByRiichi,
+		safeTiles,
+		winner: { seat: w.seat, han: w.han, fu: w.fu, score: w.score, yaku },
+		seats
+	};
+}
+
+// Validates the deal-in moments posted to /api/tile-review — each lands in a
+// Claude prompt, so everything is rebuilt from bounds-checked fields.
+export function validateDealInMoments(body: unknown): DealInMoment[] | null {
+	if (typeof body !== 'object' || body === null) return null;
+	const b = body as Record<string, unknown>;
+	if (!Array.isArray(b.moments) || b.moments.length === 0 || b.moments.length > MAX_TILE_MOMENTS) {
+		return null;
+	}
+	const out: DealInMoment[] = [];
+	for (const m of b.moments) {
+		const moment = dealInMoment(m);
+		if (!moment) return null;
+		out.push(moment);
+	}
+	return out;
 }
 
 // Validates the deterministic move log saved to games.replay (jsonb) — bounds
