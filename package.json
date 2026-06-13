@@ -4,7 +4,7 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "vite dev",
+		"dev": "NODE_OPTIONS='--dns-result-order=ipv4first --no-network-family-autoselection' vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
@@ -14,8 +14,8 @@
 		"format": "prettier --write .",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"db:push": "drizzle-kit push",
-		"db:studio": "drizzle-kit studio"
+		"db:push": "NODE_OPTIONS='--dns-result-order=ipv4first --no-network-family-autoselection' drizzle-kit push",
+		"db:studio": "NODE_OPTIONS='--dns-result-order=ipv4first --no-network-family-autoselection' drizzle-kit studio"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.0.4",
