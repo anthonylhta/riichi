@@ -54,8 +54,32 @@ function makePlayer(seat: Seat): PlayerState {
 		isIppatsu: false,
 		riichiTile: null,
 		isFuriten: false,
-		isTempFuriten: false
+		isTempFuriten: false,
+		kuikaeForbidden: []
 	};
+}
+
+// Kuikae (swap-call ban): the tile codes a seat may not discard on the turn
+// immediately following a chi/pon. After a pon it's just the called tile
+// (genbutsu). After a chi it's the called tile PLUS the "suji" other end —
+// the tile that, with the same two hand tiles, would have formed the
+// equivalent run from the opposite side (only when the call completes an end
+// of the run, not a kanchan middle). Codes only; red-five flavour is irrelevant.
+export function kuikaeForbiddenCodes(
+	callType: 'pon' | 'chi',
+	calledCode: TileCode,
+	consumedCodes: TileCode[]
+): TileCode[] {
+	if (callType === 'pon') return [calledCode];
+
+	const forbidden = [calledCode];
+	const [lo, , hi] = [...consumedCodes, calledCode].sort((a, b) => a - b);
+	const suitStart = Math.floor((calledCode - 1) / 9) * 9 + 1;
+	const suitEnd = suitStart + 8;
+	if (calledCode === lo && hi + 1 <= suitEnd)
+		forbidden.push(hi + 1); // called the low end → swap is one past the high end
+	else if (calledCode === hi && lo - 1 >= suitStart) forbidden.push(lo - 1); // called the high end → swap is one below the low end
+	return forbidden;
 }
 
 function initRound(
@@ -783,6 +807,10 @@ async function applyAiCalls(
 				player.hand.filter((t) => t.id !== ponTiles[0].id && t.id !== ponTiles[1].id)
 			);
 			players[seat].melds = [...player.melds, meld];
+			players[seat].kuikaeForbidden = kuikaeForbiddenCodes('pon', discardTile.code, [
+				ponTiles[0].code,
+				ponTiles[1].code
+			]);
 			for (const p of players) p.isIppatsu = false;
 			return pushEvent(
 				{ ...state, players, anyCallMadeThisRound: true, phase: 'ai_turn', currentSeat: seat },
@@ -814,6 +842,10 @@ async function applyAiCalls(
 				chiPlayer.hand.filter((t) => t.id !== chiTiles[0].id && t.id !== chiTiles[1].id)
 			);
 			players[chiSeat].melds = [...chiPlayer.melds, meld];
+			players[chiSeat].kuikaeForbidden = kuikaeForbiddenCodes('chi', discardTile.code, [
+				chiTiles[0].code,
+				chiTiles[1].code
+			]);
 			for (const p of players) p.isIppatsu = false;
 			return pushEvent(
 				{
@@ -848,6 +880,9 @@ export async function humanDiscard(
 	const player = state.players[0];
 	const tile = player.hand.find((t) => t.id === tileId);
 	if (!tile) return state;
+	// Kuikae: the called tile (and chi suji other-end) can't be discarded on the
+	// turn right after the call. Reject it — the UI also disables these tiles.
+	if (player.kuikaeForbidden.includes(tile.code)) return state;
 
 	// Riichi is opt-in: the player must explicitly request it, and it is only legal
 	// from a closed hand with 1000+ points that stays tenpai after this discard.
@@ -864,6 +899,7 @@ export async function humanDiscard(
 	const players = clonePlayers(state);
 	players[0].hand = sortHand(player.hand.filter((t) => t.id !== tileId));
 	players[0].discards = [...player.discards, tile];
+	players[0].kuikaeForbidden = []; // the post-call restriction lasts one discard
 
 	if (player.isRiichi && player.isIppatsu) {
 		// Post-riichi discard clears the ippatsu window
@@ -952,6 +988,10 @@ export function humanClaimPon(state: GameState, handTiles: GameTile[]): GameStat
 		player.hand.filter((t) => t.id !== handTiles[0].id && t.id !== handTiles[1].id)
 	);
 	players[0].melds = [...player.melds, meld];
+	players[0].kuikaeForbidden = kuikaeForbiddenCodes('pon', calledTile.code, [
+		handTiles[0].code,
+		handTiles[1].code
+	]);
 
 	const called = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -983,6 +1023,10 @@ export function humanClaimChi(state: GameState, handTiles: GameTile[]): GameStat
 		player.hand.filter((t) => t.id !== handTiles[0].id && t.id !== handTiles[1].id)
 	);
 	players[0].melds = [...player.melds, meld];
+	players[0].kuikaeForbidden = kuikaeForbiddenCodes('chi', calledTile.code, [
+		handTiles[0].code,
+		handTiles[1].code
+	]);
 
 	const called = pushEvent(applyCall(state, players), {
 		type: 'call',
@@ -1282,6 +1326,7 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	const players = clonePlayers(s);
 	players[seat].hand = sortHand(s.players[seat].hand.filter((t) => t.id !== discardTile.id));
 	players[seat].discards = [...s.players[seat].discards, discardTile];
+	players[seat].kuikaeForbidden = []; // the post-call restriction lasts one discard
 	// Post-riichi discard closes this AI player's ippatsu window — but never on
 	// the declaring discard itself: isRiichi is already true by this point (the
 	// flags are set just above), and the window is supposed to OPEN here. The
@@ -1365,7 +1410,8 @@ function clonePlayers(state: GameState): [PlayerState, PlayerState, PlayerState,
 		discards: [...p.discards],
 		melds: [...p.melds],
 		isFuriten: p.isFuriten,
-		isTempFuriten: p.isTempFuriten
+		isTempFuriten: p.isTempFuriten,
+		kuikaeForbidden: [...p.kuikaeForbidden]
 	})) as [PlayerState, PlayerState, PlayerState, PlayerState];
 }
 

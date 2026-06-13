@@ -30,6 +30,7 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 		riichiTile: null,
 		isFuriten: false,
 		isTempFuriten: false,
+		kuikaeForbidden: [],
 		...overrides
 	};
 }

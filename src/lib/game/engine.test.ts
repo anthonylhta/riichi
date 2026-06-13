@@ -28,7 +28,8 @@ import {
 	humanDeclareKakan,
 	humanDeclareAnkan,
 	humanClaimDaiminkan,
-	getPlayerKanOptions
+	getPlayerKanOptions,
+	kuikaeForbiddenCodes
 } from './engine';
 import { chooseDiscard, getShanten, riichiAnkanKeepsWaits, shouldDeclareRiichi } from './ai';
 import { checkWin } from './scoring';
@@ -56,6 +57,7 @@ function makePlayer(seat: number, overrides: Partial<PlayerState> = {}): PlayerS
 		riichiTile: null,
 		isFuriten: false,
 		isTempFuriten: false,
+		kuikaeForbidden: [],
 		...overrides
 	};
 }
@@ -1755,5 +1757,101 @@ describe('runAiTurn — a kan meld does not make later turns look post-call', ()
 
 		expect(result.wallPos).toBe(state.wallPos);
 		expect(result.players[1].hand).toHaveLength(10);
+	});
+});
+
+// ─── kuikae (swap-call ban) ──────────────────────────────────────────────────
+
+describe('kuikaeForbiddenCodes', () => {
+	it('pon forbids only the called tile (genbutsu)', () => {
+		expect(kuikaeForbiddenCodes('pon', 5, [5, 5])).toEqual([5]);
+	});
+
+	it('chi calling the low end forbids the called tile + suji high+1', () => {
+		// hand 3,4 + called 2 → run 2-3-4; can't discard 2 (genbutsu) or 5 (suji)
+		expect(kuikaeForbiddenCodes('chi', 2, [3, 4]).sort((a, b) => a - b)).toEqual([2, 5]);
+	});
+
+	it('chi calling the high end forbids the called tile + suji low-1', () => {
+		// hand 3,4 + called 5 → run 3-4-5; can't discard 5 or 2
+		expect(kuikaeForbiddenCodes('chi', 5, [3, 4]).sort((a, b) => a - b)).toEqual([2, 5]);
+	});
+
+	it('chi of a kanchan middle forbids only the called tile (no suji)', () => {
+		// hand 4,6 + called 5 → run 4-5-6, kanchan; only 5 is genbutsu-forbidden
+		expect(kuikaeForbiddenCodes('chi', 5, [4, 6])).toEqual([5]);
+	});
+
+	it('an in-suit suji swap IS forbidden', () => {
+		// hand 7m,8m + called 9m → run 7-8-9m; the 7-8 ryanmen also waits on 6m, so
+		// discarding 6m is the swap-back — forbidden alongside the genbutsu 9m.
+		expect(kuikaeForbiddenCodes('chi', 9, [7, 8]).sort((a, b) => a - b)).toEqual([6, 9]);
+	});
+
+	it('does not cross the suit boundary', () => {
+		// hand 8m,9m + called 7m → run 7-8-9m, called the low end; the swap tile
+		// would be 10m, which doesn't exist (8-9 is a penchan, only waits on 7) → none.
+		expect(kuikaeForbiddenCodes('chi', 7, [8, 9])).toEqual([7]);
+		// hand 1m,2m + called 3m → run 1-2-3m, called the high end; the swap tile
+		// would be 0 off the low edge (1-2 penchan, only waits on 3) → none.
+		expect(kuikaeForbiddenCodes('chi', 3, [1, 2])).toEqual([3]);
+	});
+});
+
+describe('kuikae — engine wiring', () => {
+	const NO_WIN = { isWin: false, han: 0, fu: 0, score: 0, yaku: [], yakuNames: [] };
+
+	beforeEach(() => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		vi.mocked(checkWin).mockResolvedValue(NO_WIN);
+	});
+
+	it('a human pon sets the forbidden set; the called tile cannot be discarded', async () => {
+		// Hand holds two 7p (code 16) + the discarded 7p is ponned; plus a spare 9p.
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(16, 90),
+			lastDiscardSeat: 1,
+			players: [
+				makePlayer(0, { hand: [tile(16, 1), tile(16, 2), tile(18, 3)] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const afterPon = humanClaimPon(state, [tile(16, 1), tile(16, 2)]);
+		expect(afterPon.players[0].kuikaeForbidden).toEqual([16]);
+
+		// Trying to discard a 7p (the third one in the meld is gone; the rule is by
+		// code, so even a different-id 7p would be blocked — here we discard the 9p
+		// instead, which works, while a forbidden discard is a no-op).
+		const blocked = await humanDiscard(afterPon, 90 /* not in hand */);
+		expect(blocked).toBe(afterPon); // wrong id → no-op anyway
+		// The 9p discard succeeds and clears the forbidden set.
+		const ok = await humanDiscard(afterPon, 3);
+		expect(ok.players[0].discards.map((t) => t.code)).toEqual([18]);
+		expect(ok.players[0].kuikaeForbidden).toEqual([]);
+	});
+
+	it('rejects discarding the forbidden called tile', async () => {
+		// After a pon of 7p, the hand still has a 7p (a 4th copy) it must not dump.
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(16, 90),
+			lastDiscardSeat: 1,
+			players: [
+				makePlayer(0, { hand: [tile(16, 1), tile(16, 2), tile(16, 4), tile(18, 3)] }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const afterPon = humanClaimPon(state, [tile(16, 1), tile(16, 2)]);
+		expect(afterPon.players[0].kuikaeForbidden).toEqual([16]);
+		// Discarding the leftover 7p (id 4) is rejected — it's the called code.
+		const blocked = await humanDiscard(afterPon, 4);
+		expect(blocked).toBe(afterPon);
 	});
 });

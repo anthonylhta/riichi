@@ -1,4 +1,4 @@
-import type { GameTile } from './tiles';
+import type { GameTile, TileCode } from './tiles';
 import type { GameEvent } from './events';
 
 export type Seat = 0 | 1 | 2 | 3;
@@ -29,6 +29,10 @@ export interface PlayerState {
 	riichiTile: GameTile | null;
 	isFuriten: boolean; // own-discard furiten — any wait tile appears in own discards
 	isTempFuriten: boolean; // passed on a ron opportunity; clears after next discard (unless in riichi)
+	// Tile codes this seat may NOT discard on the turn right after a chi/pon
+	// (kuikae / swap-call ban): the called tile itself, plus the suji other-end
+	// after a chi. Set when the call is made, cleared on the next discard.
+	kuikaeForbidden: TileCode[];
 }
 
 export type GamePhase =

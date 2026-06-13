@@ -26,6 +26,7 @@ function player(overrides: Partial<PlayerState>): PlayerState {
 		riichiTile: null,
 		isFuriten: false,
 		isTempFuriten: false,
+		kuikaeForbidden: [],
 		...overrides
 	};
 }

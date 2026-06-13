@@ -161,6 +161,11 @@
 	// (e.g. after an intervening claim) never blocks normal discards.
 	let riichiActive = $derived(riichiArmed && canRiichi);
 
+	// Kuikae: tile codes that can't be discarded on the turn right after a
+	// chi/pon (the called tile + chi suji other-end). Dimmed and non-clickable.
+	const kuikaeForbidden = $derived($gameState?.players[0].kuikaeForbidden ?? []);
+	const isKuikae = (t: { code: number }) => kuikaeForbidden.includes(t.code);
+
 	const WIND_NAMES = ['East', 'South', 'West', 'North'];
 	const WIND_KANJI = ['東', '南', '西', '北'];
 
@@ -391,11 +396,13 @@
 								variant="hand"
 								selected={selectedTileId === t.id}
 								clickable={$gameState.phase === 'player_discard' &&
+									!isKuikae(t) &&
 									(riichiLocked ? isDrawn : !(riichiActive && !wouldTriggerRiichi(t.id)))}
 								disabled={$gameState.phase !== 'player_discard' ||
+									isKuikae(t) ||
 									(riichiLocked ? !isDrawn : riichiActive && !wouldTriggerRiichi(t.id))}
 								riichiTrigger={riichiActive && wouldTriggerRiichi(t.id)}
-								dimmed={riichiActive && !wouldTriggerRiichi(t.id)}
+								dimmed={isKuikae(t) || (riichiActive && !wouldTriggerRiichi(t.id))}
 								highlight={!riichiLocked && hoveredCode === t.code}
 								onclick={() => handleTileClick(t.id)}
 								onmouseenter={() => {
