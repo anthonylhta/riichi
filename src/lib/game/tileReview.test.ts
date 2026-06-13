@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { initGame, continueGame, humanDiscard, humanPassClaim } from './engine';
 import { settle } from './autoplay';
-import { dealInMoments } from './tileReview';
+import { dealInMoments, mergeReviewedDealIns } from './tileReview';
+import type { DealInMoment, TileReviewResult } from './tileReview';
 import type { GameState, Seat } from './types';
 import type { GameEvent, Scores } from './events';
 import type { GameTile } from './tiles';
@@ -177,6 +178,67 @@ describe('dealInMoments — extraction', () => {
 			[3, 2000],
 			[4, 8000]
 		]);
+	});
+});
+
+describe('mergeReviewedDealIns — the cacheable shape', () => {
+	const moment = (round: number, honba: number, dealInTile: number): DealInMoment => ({
+		round,
+		honba,
+		turn: 5,
+		tilesLeft: 40,
+		doraIndicators: [10],
+		hand: [1, 2, 3, dealInTile],
+		melds: [],
+		dealInTile,
+		forcedByRiichi: false,
+		safeTiles: [],
+		winner: { seat: 2, han: 4, fu: 30, score: 8000, yaku: [] },
+		seats: []
+	});
+
+	it('keeps only the card identity + verdict, dropping the decision snapshot', () => {
+		const moments = [moment(2, 0, 33), moment(3, 1, 14)];
+		const result: TileReviewResult = {
+			verdicts: [
+				{ verdict: 'avoidable', advice: 'You held a safe 6p.' },
+				{ verdict: 'unlucky', advice: 'No way to read it.' }
+			]
+		};
+
+		const merged = mergeReviewedDealIns(moments, result);
+
+		expect(merged).toEqual([
+			{
+				round: 2,
+				honba: 0,
+				dealInTile: 33,
+				forcedByRiichi: false,
+				verdict: 'avoidable',
+				advice: 'You held a safe 6p.'
+			},
+			{
+				round: 3,
+				honba: 1,
+				dealInTile: 14,
+				forcedByRiichi: false,
+				verdict: 'unlucky',
+				advice: 'No way to read it.'
+			}
+		]);
+		// The heavy fields (hand, seats, safeTiles) are not carried into the cache.
+		expect(merged[0]).not.toHaveProperty('hand');
+		expect(merged[0]).not.toHaveProperty('seats');
+	});
+
+	it('preserves the forced-riichi flag and pairs verdicts by index', () => {
+		const m = moment(1, 0, 28);
+		m.forcedByRiichi = true;
+		const merged = mergeReviewedDealIns([m], {
+			verdicts: [{ verdict: 'justified', advice: 'Locked in riichi.' }]
+		});
+		expect(merged[0].forcedByRiichi).toBe(true);
+		expect(merged[0].verdict).toBe('justified');
 	});
 });
 
