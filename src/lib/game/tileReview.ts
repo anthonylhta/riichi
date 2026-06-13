@@ -234,3 +234,35 @@ export interface DealInVerdict {
 export interface TileReviewResult {
 	verdicts: DealInVerdict[]; // aligned with the posted moments
 }
+
+// One reviewed deal-in, exactly as the UI renders it — moment identity plus
+// the verdict, merged server-side and cached on the games row (ADR 0055) so a
+// revisit renders instantly and a re-click never re-pays.
+export interface ReviewedDealIn {
+	round: number;
+	honba: number;
+	dealInTile: TileCode;
+	forcedByRiichi: boolean;
+	verdict: DealInVerdict['verdict'];
+	advice: string;
+}
+
+// Merge the flagged moments with Claude's verdicts into the render-ready,
+// cacheable shape — keeping only the moment identity the card needs (round,
+// honba, the dealt-in tile, whether it was a forced riichi tsumogiri) and
+// dropping the heavy decision snapshot, which has already served its purpose
+// in the prompt. The result is what gets stored on the games row and returned
+// to the client. Indices align: verdicts[i] is the verdict for moments[i].
+export function mergeReviewedDealIns(
+	moments: DealInMoment[],
+	result: TileReviewResult
+): ReviewedDealIn[] {
+	return moments.map((m, i) => ({
+		round: m.round,
+		honba: m.honba,
+		dealInTile: m.dealInTile,
+		forcedByRiichi: m.forcedByRiichi,
+		verdict: result.verdicts[i].verdict,
+		advice: result.verdicts[i].advice
+	}));
+}
