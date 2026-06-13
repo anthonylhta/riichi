@@ -15,6 +15,7 @@
 		claimDaiminkan,
 		declareAnkan,
 		declareKakan,
+		declareKyuushu,
 		passClaim,
 		gameLog,
 		loadResumableReplay,
@@ -25,7 +26,7 @@
 	import { tileLabel } from '$lib/game/tiles';
 	import { limitName } from '$lib/game/scoring';
 	import { isTenpaiAfterDiscard } from '$lib/game/ai';
-	import { getPlayerKanOptions } from '$lib/game/engine';
+	import { getPlayerKanOptions, canDeclareKyuushu } from '$lib/game/engine';
 	import { buildReviewPayload, type RoundRecord } from '$lib/game/review';
 	import { buildHelperView, type HelperAdvice } from '$lib/game/helper';
 	import Tile from '$lib/components/Tile.svelte';
@@ -169,6 +170,14 @@
 	const WIND_NAMES = ['East', 'South', 'West', 'North'];
 	const WIND_KANJI = ['東', '南', '西', '北'];
 
+	const ABORT_LABELS: Record<string, string> = {
+		kyuushu: 'Abortive draw — nine terminals/honors',
+		suufon: 'Abortive draw — four winds discarded',
+		'suucha-riichi': 'Abortive draw — four riichi',
+		suukaikan: 'Abortive draw — four kans',
+		sanchahou: 'Abortive draw — triple ron'
+	};
+
 	function windIndex(seat: number, dealer: number): number {
 		return (seat - dealer + 4) % 4;
 	}
@@ -207,6 +216,10 @@
 			? getPlayerKanOptions($gameState)
 			: { ankan: [], kakan: [] }
 	);
+
+	// Kyuushu kyuuhai: offered only on the first uninterrupted draw with 9+
+	// distinct terminals/honors.
+	let canKyuushu = $derived($gameState ? canDeclareKyuushu($gameState) : false);
 
 	let seatNames = $derived(
 		$gameState
@@ -462,6 +475,11 @@
 								Kakan 加槓 ({tileLabel(opt.code)})
 							</button>
 						{/each}
+						{#if canKyuushu}
+							<button class="action-btn kyuushu-btn" onclick={declareKyuushu}>
+								Abort 九種九牌
+							</button>
+						{/if}
 					{/if}
 				</div>
 			</div>
@@ -569,9 +587,14 @@
 							{/each}
 						</div>
 					{:else}
-						<div class="win-announcement">流局</div>
-						<p class="winner-name">Draw — wall exhausted</p>
-						{#if $gameState.exhaustiveDrawResult}
+						{@const abort = $gameState.abortiveDraw}
+						{@const nagashi = ($gameState.exhaustiveDrawResult?.nagashiSeats ?? []).length > 0}
+						<div class="win-announcement">{abort ? '途中流局' : nagashi ? '流し満貫' : '流局'}</div>
+						<p class="winner-name">
+							{#if abort}{ABORT_LABELS[abort]}{:else if nagashi}Nagashi mangan{:else}Draw — wall
+								exhausted{/if}
+						</p>
+						{#if $gameState.exhaustiveDrawResult && !abort}
 							{@const edr = $gameState.exhaustiveDrawResult}
 							<div class="score-changes">
 								{#each edr.pointChanges as change, i (i)}
@@ -1290,6 +1313,14 @@
 
 	.kan-btn:hover {
 		background: #3a2060;
+	}
+
+	.kyuushu-btn {
+		background: #6b5a1a;
+	}
+
+	.kyuushu-btn:hover {
+		background: #50430f;
 	}
 
 	.riichi-btn {

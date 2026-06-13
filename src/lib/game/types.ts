@@ -57,6 +57,17 @@ export interface RoundResult {
 	pointChanges: [number, number, number, number];
 }
 
+// Abortive-draw reasons (ryuukyoku that void the hand without scoring). All of
+// them: dealer keeps the deal, honba +1, riichi sticks carry over.
+// - 'kyuushu'      — kyuushu kyuuhai: a player with 9+ distinct terminals/honors
+//                    aborts on their first uninterrupted draw (player's choice).
+// - 'suufon'       — suufon renda: all four discard the same wind on the
+//                    uninterrupted first go-around.
+// - 'suucha-riichi'— four players have declared riichi.
+// - 'suukaikan'    — four kans declared across two or more players.
+// - 'sanchahou'    — three players ron the same discard (triple ron).
+export type AbortReason = 'kyuushu' | 'suufon' | 'suucha-riichi' | 'suukaikan' | 'sanchahou';
+
 export interface ExhaustiveDrawResult {
 	tenpaiSeats: Seat[];
 	pointChanges: [number, number, number, number];
@@ -110,6 +121,10 @@ export interface GameState {
 
 	roundResult: RoundResult | null;
 	exhaustiveDrawResult: ExhaustiveDrawResult | null;
+	// Non-null when the round ended as an abortive draw (see AbortReason). The
+	// hand is voided: no scoring, dealer keeps, honba +1, sticks carry. A zeroed
+	// exhaustiveDrawResult is also set so the round-end draw overlay still renders.
+	abortiveDraw: AbortReason | null;
 
 	// Append-only record of every observable action this game (all seats, all
 	// rounds — carried across initRound). See events.ts; consumed by mjai.ts.

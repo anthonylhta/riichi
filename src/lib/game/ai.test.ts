@@ -64,6 +64,7 @@ function makeState(player1: PlayerState, overrides: Partial<GameState> = {}): Ga
 		claimOptions: null,
 		roundResult: null,
 		exhaustiveDrawResult: null,
+		abortiveDraw: null,
 		events: [],
 		...overrides
 	};

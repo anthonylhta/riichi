@@ -12,7 +12,7 @@
 // the rulebook.
 
 import type { GameTile } from './tiles';
-import type { Seat } from './types';
+import type { AbortReason, Seat } from './types';
 
 export type Scores = [number, number, number, number];
 
@@ -63,6 +63,9 @@ export type GameEvent =
 			deltas: Scores;
 			uraIndicators: GameTile[];
 	  }
-	| { type: 'ryuukyoku'; tenpaiSeats: Seat[]; deltas: Scores }
+	// `abortive` is set for an abortive draw (kyuushu/suufon/suucha-riichi/
+	// suukaikan/sanchahou): the hand is voided, deltas are all zero, tenpaiSeats
+	// is empty. Absent for an ordinary exhaustive draw.
+	| { type: 'ryuukyoku'; tenpaiSeats: Seat[]; deltas: Scores; abortive?: AbortReason }
 	// Final scores after leftover riichi sticks settle to 1st place.
 	| { type: 'game_end'; scores: Scores };

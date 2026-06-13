@@ -1,6 +1,7 @@
 import { createWall, shuffleTiles, TC, isSimple } from './tiles';
 import type { GameTile, TileCode } from './tiles';
 import type {
+	AbortReason,
 	ClaimOption,
 	ExhaustiveDrawResult,
 	GameState,
@@ -153,6 +154,7 @@ function initRound(
 		claimOptions: null,
 		roundResult: null,
 		exhaustiveDrawResult: null,
+		abortiveDraw: null,
 		events: [
 			...priorEvents,
 			{
@@ -198,17 +200,19 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	let nextRound = state.round;
 
 	if (result === null) {
-		// Exhaustive draw: honba always advances, but the dealer keeps the deal
-		// (renchan) only if tenpai. A noten dealer passes the deal and the round
-		// advances — otherwise a noten draw repeats the same hand forever.
+		// Any draw bumps honba. An abortive draw (kyuushu/suufon/suucha-riichi/
+		// suukaikan/sanchahou) voids the hand and the dealer always keeps the deal.
+		// An ordinary exhaustive draw keeps the dealer only on tenpai (or nagashi);
+		// a noten dealer passes — otherwise a noten draw repeats the hand forever.
 		nextHonba++;
-		// Dealer renchan on a draw: keep the deal when tenpai — or when the dealer
-		// scored nagashi mangan (effectively a dealer "win", so the deal repeats).
-		const dealerTenpai = state.exhaustiveDrawResult?.tenpaiSeats.includes(state.dealer) ?? false;
-		const dealerNagashi = state.exhaustiveDrawResult?.nagashiSeats.includes(state.dealer) ?? false;
-		if (!dealerTenpai && !dealerNagashi) {
-			nextDealer = ((state.dealer + 1) % 4) as Seat;
-			nextRound++;
+		if (state.abortiveDraw === null) {
+			const dealerTenpai = state.exhaustiveDrawResult?.tenpaiSeats.includes(state.dealer) ?? false;
+			const dealerNagashi =
+				state.exhaustiveDrawResult?.nagashiSeats.includes(state.dealer) ?? false;
+			if (!dealerTenpai && !dealerNagashi) {
+				nextDealer = ((state.dealer + 1) % 4) as Seat;
+				nextRound++;
+			}
 		}
 	} else if (result.winner === state.dealer) {
 		nextHonba++;
@@ -308,6 +312,84 @@ function applyExhaustiveDraw(state: GameState): GameState {
 		exhaustiveDrawResult
 	};
 	return pushEvent(ended, { type: 'ryuukyoku', tenpaiSeats, deltas: pointChanges });
+}
+
+// End the round as an abortive draw: the hand is voided (no scoring), and a
+// zeroed exhaustive-draw result is set so the round-end draw overlay still
+// renders. continueGame reads `abortiveDraw` to keep the dealer's deal.
+function applyAbortiveDraw(state: GameState, reason: AbortReason): GameState {
+	const ended: GameState = {
+		...state,
+		phase: 'round_end',
+		roundResult: null,
+		exhaustiveDrawResult: { tenpaiSeats: [], pointChanges: [0, 0, 0, 0], nagashiSeats: [] },
+		abortiveDraw: reason
+	};
+	return pushEvent(ended, {
+		type: 'ryuukyoku',
+		tenpaiSeats: [],
+		deltas: [0, 0, 0, 0],
+		abortive: reason
+	});
+}
+
+// Suukaikan: four kans exist across two or more seats. Four kans by ONE seat is
+// suukantsu (tenpai) and does NOT abort — only a split set of four does.
+function suukaikanAbort(state: GameState): boolean {
+	let total = 0;
+	const seatsWithKan = new Set<number>();
+	for (const p of state.players) {
+		const kans = p.melds.filter((m) => m.tiles.length === 4).length;
+		total += kans;
+		if (kans > 0) seatsWithKan.add(p.seat);
+	}
+	return total >= 4 && seatsWithKan.size >= 2;
+}
+
+const WIND_CODES: TileCode[] = [TC.EAST, TC.SOUTH, TC.WEST, TC.NORTH];
+
+// Abort conditions evaluated right after a discard has survived every ron check,
+// before any call on it: suukaikan, suucha riichi (all four in riichi), and
+// suufon renda (all four discarded the same wind on the uninterrupted first
+// go-around). Returns the aborted round-end state, or null to continue play.
+function checkAbortAfterDiscard(state: GameState): GameState | null {
+	if (suukaikanAbort(state)) return applyAbortiveDraw(state, 'suukaikan');
+	if (state.players.every((p) => p.isRiichi)) return applyAbortiveDraw(state, 'suucha-riichi');
+	const firstWind = state.players[0].discards[0];
+	if (
+		!state.anyCallMadeThisRound &&
+		state.players.every((p) => p.discards.length === 1) &&
+		firstWind &&
+		WIND_CODES.includes(firstWind.code) &&
+		state.players.every((p) => p.discards[0].code === firstWind.code)
+	) {
+		return applyAbortiveDraw(state, 'suufon');
+	}
+	return null;
+}
+
+// Kyuushu kyuuhai: a player may abort on their first uninterrupted draw (no calls
+// yet, no discard yet) if the 14-tile hand holds 9+ distinct terminals/honors.
+function distinctTerminalsHonors(hand: GameTile[]): number {
+	const codes = new Set<TileCode>();
+	for (const t of hand) if (!isSimple(t.code)) codes.add(t.code);
+	return codes.size;
+}
+
+export function canDeclareKyuushu(state: GameState): boolean {
+	if (state.phase !== 'player_discard' || state.currentSeat !== 0) return false;
+	const player = state.players[0];
+	return (
+		!state.anyCallMadeThisRound &&
+		player.discards.length === 0 &&
+		player.melds.length === 0 &&
+		distinctTerminalsHonors(player.hand) >= 9
+	);
+}
+
+export function humanDeclareKyuushu(state: GameState): GameState {
+	if (!canDeclareKyuushu(state)) return state;
+	return applyAbortiveDraw(state, 'kyuushu');
 }
 
 function drawTile(state: GameState, seat: Seat): GameState {
@@ -992,7 +1074,10 @@ export async function humanDiscard(
 
 	// The discard survived every ron check — flip any deferred minkan dora and
 	// complete a pending riichi.
-	return applyAiCalls(settleDiscard(newState), tile, 0);
+	const settled = settleDiscard(newState);
+	const aborted = checkAbortAfterDiscard(settled);
+	if (aborted) return aborted;
+	return applyAiCalls(settled, tile, 0);
 }
 
 export async function humanDeclareTsumo(state: GameState): Promise<GameState> {
@@ -1252,6 +1337,9 @@ export async function humanPassClaim(state: GameState): Promise<GameState> {
 	// complete a pending riichi.
 	const settled = settleDiscard(cleared);
 
+	const aborted = checkAbortAfterDiscard(settled);
+	if (aborted) return aborted;
+
 	const afterAiCalls = await applyAiCalls(settled, discardTile, discarderSeat);
 	if (afterAiCalls !== settled) return afterAiCalls;
 
@@ -1448,6 +1536,9 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 	// complete a pending riichi. (In the claim_decision path above the human can
 	// still ron, so settling waits for humanPassClaim / a claim handler instead.)
 	s = settleDiscard(s);
+
+	const aborted = checkAbortAfterDiscard(s);
+	if (aborted) return aborted;
 
 	// Check AI pon/chi/daiminkan
 	const afterAiCalls = await applyAiCalls(s, discardTile, seat);

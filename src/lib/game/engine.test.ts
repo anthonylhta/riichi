@@ -29,7 +29,9 @@ import {
 	humanDeclareAnkan,
 	humanClaimDaiminkan,
 	getPlayerKanOptions,
-	kuikaeForbiddenCodes
+	kuikaeForbiddenCodes,
+	canDeclareKyuushu,
+	humanDeclareKyuushu
 } from './engine';
 import { chooseDiscard, getShanten, riichiAnkanKeepsWaits, shouldDeclareRiichi } from './ai';
 import { checkWin } from './scoring';
@@ -97,6 +99,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
 		claimOptions: null,
 		roundResult: null,
 		exhaustiveDrawResult: null,
+		abortiveDraw: null,
 		events: [],
 		...overrides
 	};
@@ -2007,5 +2010,182 @@ describe('nagashi mangan', () => {
 		] as GameState['players']);
 
 		expect(result.exhaustiveDrawResult?.nagashiSeats).toEqual([]);
+	});
+});
+
+// ─── abortive draws ──────────────────────────────────────────────────────────
+
+function kanMeld(code: number, base: number): Meld {
+	return {
+		type: 'ankan',
+		tiles: [tile(code, base), tile(code, base + 1), tile(code, base + 2), tile(code, base + 3)],
+		calledFrom: null
+	};
+}
+
+describe('abortive draws', () => {
+	beforeEach(() => {
+		vi.mocked(checkWin).mockResolvedValue({
+			isWin: false,
+			han: 0,
+			fu: 0,
+			score: 0,
+			yaku: [],
+			yakuNames: []
+		});
+	});
+
+	it('suufon renda: all four discard the same wind on the first go-around', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		// Dealer is seat 1, so the human (seat 0) is the fourth discarder. Seats
+		// 1–3 have each discarded East already; the human discards East now.
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 1,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand: [tile(28, 1), tile(5, 2)], discards: [] }),
+				makePlayer(1, { discards: [tile(28, 10)] }),
+				makePlayer(2, { discards: [tile(28, 11)] }),
+				makePlayer(3, { discards: [tile(28, 12)] })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1); // discard the East (id 1)
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('suufon');
+	});
+
+	it('a non-wind first go-around does NOT abort', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			dealer: 1,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(6, 2)], discards: [] }),
+				makePlayer(1, { discards: [tile(5, 10)] }),
+				makePlayer(2, { discards: [tile(5, 11)] }),
+				makePlayer(3, { discards: [tile(5, 12)] })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1); // discard 5m, not a wind
+		expect(result.abortiveDraw).toBeNull();
+	});
+
+	it('suucha riichi: the fourth riichi aborts the round', async () => {
+		vi.mocked(getShanten).mockReturnValue(0); // human hand is tenpai → riichi legal
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(6, 2)], discards: [tile(9, 50)] }),
+				makePlayer(1, { isRiichi: true }),
+				makePlayer(2, { isRiichi: true }),
+				makePlayer(3, { isRiichi: true })
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1, true); // declare the 4th riichi
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('suucha-riichi');
+	});
+
+	it('suukaikan: four kans across two seats abort', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(6, 2)] }),
+				makePlayer(1, { melds: [kanMeld(1, 100), kanMeld(2, 110)] }),
+				makePlayer(2, { melds: [kanMeld(3, 120), kanMeld(4, 130)] }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1);
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('suukaikan');
+	});
+
+	it('four kans by ONE seat (suukantsu) does NOT abort', async () => {
+		vi.mocked(getShanten).mockReturnValue(8);
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			players: [
+				makePlayer(0, { hand: [tile(5, 1), tile(6, 2)] }),
+				makePlayer(1, {
+					melds: [kanMeld(1, 100), kanMeld(2, 110), kanMeld(3, 120), kanMeld(4, 130)]
+				}),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanDiscard(state, 1);
+		expect(result.abortiveDraw).toBeNull();
+	});
+});
+
+describe('kyuushu kyuuhai', () => {
+	// A 14-tile hand with 9 distinct terminals/honors (1m 9m 1p 9p 1s 9s E S W).
+	const NINE_TYPES = [1, 9, 10, 18, 19, 27, 28, 29, 30];
+
+	it('canDeclareKyuushu is true on a 9+ terminal/honor first draw', () => {
+		const hand = [...NINE_TYPES, 1, 9, 10, 18, 19].map((c, i) => tile(c, i + 1));
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+		expect(canDeclareKyuushu(state)).toBe(true);
+		const result = humanDeclareKyuushu(state);
+		expect(result.phase).toBe('round_end');
+		expect(result.abortiveDraw).toBe('kyuushu');
+	});
+
+	it('is false with only 8 distinct terminals/honors', () => {
+		const eight = [1, 9, 10, 18, 19, 27, 28, 29];
+		const hand = [...eight, 1, 9, 10, 18, 19, 27].map((c, i) => tile(c, i + 1));
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			anyCallMadeThisRound: false,
+			players: [
+				makePlayer(0, { hand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+		expect(canDeclareKyuushu(state)).toBe(false);
+	});
+
+	it('is false once a call has interrupted the first go-around', () => {
+		const hand = [...NINE_TYPES, 1, 9, 10, 18, 19].map((c, i) => tile(c, i + 1));
+		const state = makeState({
+			phase: 'player_discard',
+			currentSeat: 0,
+			anyCallMadeThisRound: true,
+			players: [
+				makePlayer(0, { hand }),
+				makePlayer(1),
+				makePlayer(2),
+				makePlayer(3)
+			] as GameState['players']
+		});
+		expect(canDeclareKyuushu(state)).toBe(false);
 	});
 });
