@@ -978,21 +978,47 @@ export function getHumanClaimOptions(
 
 // ── AI Call Decisions ──────────────────────────────────────────────────────────
 
-function aiPonHandTiles(hand: GameTile[], calledTile: GameTile): [GameTile, GameTile] | null {
-	if (getShanten(hand.map((t) => t.code)) === 0) return null;
-	const matching = hand.filter((t) => t.code === calledTile.code);
-	if (matching.length < 2) return null;
-	return [matching[0], matching[1]];
+// Best shanten reachable after a call removes `consumed` from the hand and the
+// caller discards one of the remaining tiles (the called tile joins the meld).
+// Mirrors the shanten-improvement test aiChiHandTiles uses.
+function bestShantenAfterCall(hand: GameTile[], consumed: GameTile[]): number {
+	const consumedIds = new Set(consumed.map((t) => t.id));
+	const remaining = hand.filter((t) => !consumedIds.has(t.id));
+	let minSh = 8;
+	for (const t of remaining) {
+		const sh = getShanten(remaining.filter((r) => r.id !== t.id).map((r) => r.code));
+		if (sh < minSh) minSh = sh;
+	}
+	return minSh;
 }
 
+// Pon only when it strictly improves shanten (same rule as chi) — no longer the
+// old greedy "pon any pair", so the AI stops making calls that just open its hand
+// for nothing. A tenpai hand never calls (it would only break its wait).
+function aiPonHandTiles(hand: GameTile[], calledTile: GameTile): [GameTile, GameTile] | null {
+	const currentShanten = getShanten(hand.map((t) => t.code));
+	if (currentShanten === 0) return null;
+	const matching = hand.filter((t) => t.code === calledTile.code);
+	if (matching.length < 2) return null;
+	const consumed = [matching[0], matching[1]];
+	return bestShantenAfterCall(hand, consumed) < currentShanten ? [matching[0], matching[1]] : null;
+}
+
+// Daiminkan with the same shanten-improvement gate. A held triplet already counts
+// as a complete set, so kan'ing it almost never lowers shanten — in practice this
+// retires the old greedy daiminkan (value-kan for dora isn't modelled; kept simple).
 function aiDaiminkanHandTiles(
 	hand: GameTile[],
 	calledTile: GameTile
 ): [GameTile, GameTile, GameTile] | null {
-	if (getShanten(hand.map((t) => t.code)) === 0) return null;
+	const currentShanten = getShanten(hand.map((t) => t.code));
+	if (currentShanten === 0) return null;
 	const matching = hand.filter((t) => t.code === calledTile.code);
 	if (matching.length < 3) return null;
-	return [matching[0], matching[1], matching[2]];
+	const consumed = [matching[0], matching[1], matching[2]];
+	return bestShantenAfterCall(hand, consumed) < currentShanten
+		? [matching[0], matching[1], matching[2]]
+		: null;
 }
 
 function aiChiHandTiles(
@@ -1555,7 +1581,10 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		if (tsumo) return applyRoundResult(s, tsumo);
 	}
 
-	// Good AI declares kan when possible (normal turns only)
+	// Good AI declares kan when possible (normal turns only). A smarter "only kan a
+	// realised hand" gate needs meld-aware shanten, which the shanten lib doesn't do
+	// (the same concealed-only limitation noted for ai.ts/the helper) — kan'ing a
+	// concealed quad is rarely bad anyway, so this is left until that lands.
 	if (!isPostCall && s.players[seat].difficulty === 'good') {
 		const ankanCodes = canKan(s) ? getAnkanOptions(s.players[seat]) : [];
 		if (ankanCodes.length > 0 && callKeepsLegalHand(s.players[seat].hand.length, 4, true)) {

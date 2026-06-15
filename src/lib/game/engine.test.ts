@@ -276,7 +276,9 @@ describe('humanPassClaim', () => {
 	it('lets an AI pon the discard the human passed on', async () => {
 		// Seat 2 holds two matching tiles for the discarded 23; passing must not
 		// forfeit that pon — applyAiCalls should fire and seat 2 becomes current.
-		vi.mocked(getShanten).mockReturnValue(8); // not tenpai → AI is willing to pon
+		// Shanten drops for the smaller post-call hand, so the pon is an improvement
+		// (the new shanten-gated pon only fires when it strictly helps).
+		vi.mocked(getShanten).mockImplementation((codes) => (codes.length >= 3 ? 8 : 0));
 		const discarded = tile(23, 50);
 		const state = makeState({
 			phase: 'claim_decision',
@@ -302,6 +304,30 @@ describe('humanPassClaim', () => {
 		expect(result.players[2].melds).toHaveLength(1);
 		expect(result.players[2].melds[0].type).toBe('pon');
 		expect(result.players[2].melds[0].tiles).toEqual([tile(23, 60), tile(23, 61), discarded]);
+	});
+
+	it('declines a pon that would not improve shanten (no longer greedy)', async () => {
+		// Flat shanten → the pon never lowers it, so the new shanten-gated pon must
+		// decline (the old greedy pon would have called any pair).
+		vi.mocked(getShanten).mockReturnValue(3);
+		const state = makeState({
+			phase: 'claim_decision',
+			lastDiscard: tile(23, 50),
+			lastDiscardSeat: 1,
+			pendingRon: null,
+			claimOptions: [],
+			players: [
+				makePlayer(0),
+				makePlayer(1),
+				makePlayer(2, { hand: [tile(23, 60), tile(23, 61), tile(9, 62), tile(8, 63)] }),
+				makePlayer(3)
+			] as GameState['players']
+		});
+
+		const result = await humanPassClaim(state);
+
+		expect(result.players[2].melds).toHaveLength(0);
+		expect(result.anyCallMadeThisRound).toBe(false);
 	});
 
 	it('returns state unchanged when not in claim_decision', async () => {
@@ -1347,6 +1373,9 @@ describe('kan — illegal with an empty live wall', () => {
 	it('an AI with three matching tiles pons instead of daiminkans on an empty wall', async () => {
 		// Seat 1 holds three of the discarded tile + spares; with the wall empty the
 		// daiminkan branch must be skipped, falling through to the pon branch.
+		// Shanten drops for the smaller post-call hand so the (now shanten-gated) pon
+		// still fires once daiminkan is ruled out.
+		vi.mocked(getShanten).mockImplementation((codes) => (codes.length >= 3 ? 8 : 0));
 		const state = makeState({
 			wallPos: 70,
 			players: [
