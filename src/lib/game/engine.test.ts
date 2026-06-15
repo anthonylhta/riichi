@@ -705,6 +705,91 @@ describe('continueGame — 30k target + sudden-death overtime', () => {
 	});
 });
 
+describe('continueGame — agari-yame / tenpai-yame', () => {
+	const win = (winner: Seat, loser: Seat): RoundResult => ({
+		winner,
+		winType: 'ron',
+		loser,
+		han: 3,
+		fu: 30,
+		score: 3900,
+		yaku: [],
+		pointChanges: [0, 0, 0, 0]
+	});
+
+	const winState = (
+		round: number,
+		scores: [number, number, number, number],
+		result: RoundResult,
+		dealer: Seat = 0
+	) =>
+		makeState({
+			phase: 'round_end',
+			round,
+			dealer,
+			roundResult: result,
+			players: scores.map((s, i) => makePlayer(i, { score: s })) as GameState['players']
+		});
+
+	const drawState = (
+		scores: [number, number, number, number],
+		tenpaiSeats: Seat[],
+		over: Partial<GameState> = {},
+		dealer: Seat = 0
+	) =>
+		makeState({
+			phase: 'round_end',
+			round: 4,
+			dealer,
+			roundResult: null,
+			exhaustiveDrawResult: { tenpaiSeats, pointChanges: [0, 0, 0, 0], nagashiSeats: [] },
+			players: scores.map((s, i) => makePlayer(i, { score: s })) as GameState['players'],
+			...over
+		});
+
+	it('ends the game when a 1st-place dealer wins at East-4 over the target (agari-yame)', () => {
+		const next = continueGame(winState(4, [33000, 25000, 22000, 20000], win(0, 1)));
+		expect(next.phase).toBe('game_end');
+	});
+
+	it('ends the game when a 1st-place dealer is tenpai on an East-4 draw (tenpai-yame)', () => {
+		const next = continueGame(drawState([32000, 25000, 23000, 20000], [0]));
+		expect(next.phase).toBe('game_end');
+	});
+
+	it('continues the renchan when the winning dealer is NOT the leader', () => {
+		// seat 1 leads; dealer (seat 0) won but can't yame — must keep dealing.
+		const next = continueGame(winState(4, [28000, 35000, 22000, 15000], win(0, 1)));
+		expect(next.phase).not.toBe('game_end');
+		expect(next.round).toBe(4);
+		expect(next.dealer).toBe(0);
+	});
+
+	it('continues the renchan when the leading dealer is still under the target', () => {
+		const next = continueGame(winState(4, [29000, 27000, 24000, 20000], win(0, 1)));
+		expect(next.phase).not.toBe('game_end');
+		expect(next.round).toBe(4);
+	});
+
+	it('does NOT yame on an abortive draw (the hand is just redone)', () => {
+		const next = continueGame(
+			drawState([32000, 25000, 23000, 20000], [], {
+				abortiveDraw: 'suukaikan',
+				exhaustiveDrawResult: { tenpaiSeats: [], pointChanges: [0, 0, 0, 0], nagashiSeats: [] }
+			})
+		);
+		expect(next.phase).not.toBe('game_end');
+		expect(next.round).toBe(4);
+		expect(next.dealer).toBe(0);
+	});
+
+	it('does not trigger before the last hand (East-1 dealer win over target)', () => {
+		const next = continueGame(winState(1, [33000, 25000, 22000, 20000], win(0, 1)));
+		expect(next.phase).not.toBe('game_end');
+		expect(next.round).toBe(1);
+	});
+});
+
 // ─── AI furiten ──────────────────────────────────────────────────────────────
 
 describe('AI ron — furiten', () => {
