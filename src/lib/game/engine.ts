@@ -200,6 +200,9 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	let nextDealer = state.dealer;
 	let nextHonba = state.honba;
 	let nextRound = state.round;
+	// A dealer renchan via a WIN (agari-yame) or an exhaustive-draw tenpai/nagashi
+	// (tenpai-yame) — but NOT an abortive draw (those just redo the hand, no yame).
+	let yameEligible = false;
 
 	if (result === null) {
 		// Any draw bumps honba. An abortive draw (kyuushu/suufon/suucha-riichi/
@@ -214,6 +217,8 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 			if (!dealerTenpai && !dealerNagashi) {
 				nextDealer = ((state.dealer + 1) % 4) as Seat;
 				nextRound++;
+			} else {
+				yameEligible = true;
 			}
 		}
 	} else if (
@@ -222,6 +227,7 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	) {
 		// Dealer won (or was one of the double-ron winners) → renchan.
 		nextHonba++;
+		yameEligible = true;
 	} else {
 		nextDealer = ((state.dealer + 1) % 4) as Seat;
 		nextHonba = 0;
@@ -231,6 +237,23 @@ export function continueGame(state: GameState, wall?: GameTile[]): GameState {
 	// MJ Soul tobi: busting is a strictly-negative score; exactly 0 stays alive.
 	const bust = state.players.some((p) => p.score < 0);
 	if (bust) {
+		return endGame(state);
+	}
+
+	// Agari-yame / tenpai-yame (MJ Soul ranked default, applied automatically). At
+	// the nominal last hand (East-4) a renchan keeps the round number, so without
+	// this a 1st-place dealer who has already met the target would be *forced* to
+	// keep dealing. If that renchan came from a win or an exhaustive tenpai/nagashi
+	// and the dealer is the leader at/over the target, end the game instead. (In
+	// South overtime the existing target check already ends a renchan, so this only
+	// matters at East-4.)
+	const leaderSeat = state.players.reduce((best, p) => (p.score > best.score ? p : best)).seat;
+	if (
+		state.round === LAST_REGULAR_ROUND &&
+		yameEligible &&
+		leaderSeat === state.dealer &&
+		state.players[state.dealer].score >= TARGET_SCORE
+	) {
 		return endGame(state);
 	}
 
