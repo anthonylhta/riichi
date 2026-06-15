@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { tileLabel, getSuit, getValue } from '$lib/game/tiles';
 	import type { GameTile } from '$lib/game/tiles';
+	import TileFace from './TileFace.svelte';
 
 	type Variant = 'hand' | 'pond' | 'meld' | 'dora';
 
@@ -35,27 +35,12 @@
 		onmouseenter?: (() => void) | undefined;
 		onmouseleave?: (() => void) | undefined;
 	} = $props();
-
-	// Per-tile colour: number suits by colour, dragons split (white/green/red).
-	function colorClass(code: number): string {
-		const suit = getSuit(code as never);
-		if (suit !== 'dragon') return suit;
-		const v = getValue(code as never);
-		return v === 1 ? 'haku' : v === 2 ? 'hatsu' : 'chun';
-	}
-
-	// White dragon (haku) renders as a blank face — a traditional blank white-dragon
-	// tile — rather than a glyph.
-	function faceLabel(code: number): string {
-		if (getSuit(code as never) === 'dragon' && getValue(code as never) === 1) return '';
-		return tileLabel(code);
-	}
 </script>
 
 {#if back}
 	<div class="tile tile-back variant-{variant}" class:rotated></div>
 {:else if tile}
-	{@const cls = `tile tile-face variant-${variant} color-${colorClass(tile.code)}`}
+	{@const cls = `tile tile-face variant-${variant}`}
 	{#if onclick}
 		<button
 			class={cls}
@@ -70,11 +55,11 @@
 			{onmouseenter}
 			{onmouseleave}
 		>
-			<span class="label">{faceLabel(tile.code)}</span>
+			<TileFace code={tile.code} red={tile.isRed} />
 		</button>
 	{:else}
 		<div class={cls} class:highlight class:dimmed class:recent class:rotated class:red={tile.isRed}>
-			<span class="label">{faceLabel(tile.code)}</span>
+			<TileFace code={tile.code} red={tile.isRed} />
 		</div>
 	{/if}
 {/if}
@@ -86,10 +71,8 @@
 		justify-content: center;
 		box-sizing: border-box;
 		border-radius: 5px;
-		font-weight: 700;
 		user-select: none;
 		flex: none;
-		font-family: 'Inter', system-ui, sans-serif;
 	}
 
 	/* Ivory tile face — light surface so tiles read against the dark table */
@@ -107,11 +90,6 @@
 			filter 0.12s ease;
 	}
 
-	.label {
-		line-height: 1;
-		transform: translateY(-1px);
-	}
-
 	/* Face-down tile (concealed opponent hands) */
 	.tile-back {
 		background: linear-gradient(168deg, #243042 0%, #1b2436 100%);
@@ -126,53 +104,26 @@
 	.variant-hand {
 		width: 44px;
 		height: 60px;
-		font-size: 1.05rem;
 	}
 	.variant-pond {
 		width: 26px;
 		height: 34px;
-		font-size: 0.72rem;
 	}
 	.variant-meld {
 		width: 24px;
 		height: 32px;
-		font-size: 0.7rem;
 	}
 	.variant-dora {
 		width: 32px;
 		height: 44px;
-		font-size: 0.85rem;
 	}
 	.tile-back.variant-pond {
 		width: 20px;
 		height: 28px;
 	}
 
-	/* Suit / honour colours, tuned for legibility on the ivory face */
-	.color-man .label {
-		color: #b3242b;
-	}
-	.color-pin .label {
-		color: #1763b8;
-	}
-	.color-sou .label {
-		color: #1f7a34;
-	}
-	.color-wind .label {
-		color: #2b2b2b;
-	}
-	.color-haku .label {
-		color: #2f6fae;
-	}
-	.color-hatsu .label {
-		color: #1f7a34;
-	}
-	.color-chun .label {
-		color: #c41e3a;
-	}
-
-	/* Aka dora (red five) — keep the normal ivory face; mark it with a small red dot
-	   in the top-right corner (the crimson glow was too much) and force the number red. */
+	/* Aka dora (red five) — the SVG face already renders its art in crimson; we keep a
+	   small red dot in the top-right corner as a second, at-a-glance marker. */
 	.red {
 		position: relative;
 	}
@@ -186,9 +137,6 @@
 		border-radius: 50%;
 		background: #c41e3a;
 		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
-	}
-	.red .label {
-		color: #c41e3a;
 	}
 
 	/* Interaction (hand tiles) */
