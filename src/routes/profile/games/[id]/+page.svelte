@@ -150,6 +150,10 @@
 		</p>
 
 		{#if g.hasReplay}
+			<p class="watch">
+				<a class="watch-link" href="/profile/games/{g.id}/replay">▶ Watch replay 牌譜再生</a>
+				<span class="export-sub">step through the whole game on the board, turn by turn</span>
+			</p>
 			<p class="export">
 				<button
 					class="export-link"
@@ -350,6 +354,23 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.15rem;
+	}
+	/* Watch replay — the primary action above the (quieter) export links. */
+	.watch {
+		margin: 0.2rem 0 0.4rem;
+		text-align: center;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+	.watch-link {
+		color: #c41e3a;
+		text-decoration: none;
+		font-size: 1rem;
+		font-weight: 600;
+	}
+	.watch-link:hover {
+		color: #e8e0d5;
 	}
 	.export-link {
 		color: #8a8278;

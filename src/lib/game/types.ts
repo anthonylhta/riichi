@@ -42,6 +42,32 @@ export interface PlayerState {
 	paoSeat: Seat | null;
 }
 
+// The read-only slice of game state the board needs to render a table. GameState
+// satisfies it structurally (its PlayerState has all of BoardPlayer's fields and
+// more), so the live game passes `$gameState` unchanged; the replay viewer builds
+// a BoardView per step from the event stream (see replayView.ts) without
+// reconstructing a whole GameState.
+export interface BoardPlayer {
+	hand: GameTile[];
+	discards: GameTile[];
+	melds: Meld[];
+	score: number;
+	isRiichi: boolean;
+	isFuriten: boolean;
+	isTempFuriten: boolean;
+}
+
+export interface BoardView {
+	players: [BoardPlayer, BoardPlayer, BoardPlayer, BoardPlayer];
+	currentSeat: Seat;
+	dealer: Seat;
+	honba: number;
+	wallPos: number;
+	wallEnd: number;
+	doraIndicators: GameTile[];
+	riichiBets: number;
+}
+
 export type GamePhase =
 	| 'dealing'
 	| 'player_discard' // waiting for human to discard

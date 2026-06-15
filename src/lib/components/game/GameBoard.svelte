@@ -1,22 +1,26 @@
 <script lang="ts">
 	import Tile from '$lib/components/Tile.svelte';
-	import type { GameState } from '$lib/game/types';
+	import type { BoardView } from '$lib/game/types';
 
 	// The table: each seat's hand at its edge, the four discard rivers ringing the
 	// central board (round/wall/dora/sticks). Presentational — the page owns state;
 	// hoveredCode (set by the player's own hand) lights up matching river tiles.
+	// Takes a BoardView (GameState satisfies it); the replay viewer passes a
+	// reconstructed snapshot and sets revealAll to show opponents' hands face-up.
 	let {
 		state,
 		seatNames,
 		hoveredCode,
 		roundWindKanji,
-		roundNumber
+		roundNumber,
+		revealAll = false
 	}: {
-		state: GameState;
+		state: BoardView;
 		seatNames: string[];
 		hoveredCode: number | null;
 		roundWindKanji: string;
 		roundNumber: number;
+		revealAll?: boolean;
 	} = $props();
 
 	const WIND_KANJI = ['東', '南', '西', '北'];
@@ -35,9 +39,13 @@
 		<span class="seat-score">{p.score.toLocaleString()}</span>
 		{#if p.isRiichi}<span class="riichi-badge">立直</span>{/if}
 	</div>
-	<div class="concealed">
+	<div class="concealed" class:revealed={revealAll}>
 		{#each p.hand as t (t.id)}
-			<Tile back variant="pond" />
+			{#if revealAll}
+				<Tile tile={t} variant="pond" />
+			{:else}
+				<Tile back variant="pond" />
+			{/if}
 		{/each}
 	</div>
 	{#if p.melds.length > 0}
