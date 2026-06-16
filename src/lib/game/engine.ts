@@ -1581,10 +1581,13 @@ export async function runAiTurn(state: GameState): Promise<GameState> {
 		if (tsumo) return applyRoundResult(s, tsumo);
 	}
 
-	// Good AI declares kan when possible (normal turns only). A smarter "only kan a
-	// realised hand" gate needs meld-aware shanten, which the shanten lib doesn't do
-	// (the same concealed-only limitation noted for ai.ts/the helper) — kan'ing a
-	// concealed quad is rarely bad anyway, so this is left until that lands.
+	// Good AI declares kan when possible (normal turns only). No shanten gate: a
+	// kan is shanten-neutral — four identical tiles are a triplet + a floater either
+	// way, so the lib gives the same shanten whether they're kanned or one copy is
+	// discarded (kakan likewise just relocates an already-melded set's 4th tile).
+	// The non-shanten downsides (revealing info, fixing the hand) are a strength/
+	// style question, not a correctness one; the wait-preservation gate during
+	// riichi (ADR 0048) already covers the case that does matter.
 	if (!isPostCall && s.players[seat].difficulty === 'good') {
 		const ankanCodes = canKan(s) ? getAnkanOptions(s.players[seat]) : [];
 		if (ankanCodes.length > 0 && callKeepsLegalHand(s.players[seat].hand.length, 4, true)) {

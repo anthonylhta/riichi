@@ -1,8 +1,9 @@
 // In-round AI helper. The player presses a button on their turn; we send the
 // human-visible view (see $lib/game/helper) and ask Claude for ONE grounded
-// recommendation. For a closed 14-tile hand we attach the efficiency ranking
-// (shanten/ukeire) from mahjong-tile-efficiency so the discard advice is anchored
-// in real numbers and Claude focuses on the strategic "why".
+// recommendation. We attach the efficiency ranking (shanten/ukeire) from the
+// meld-aware mahjong-tile-efficiency lib — for open hands too (ADR 0069) — so the
+// discard advice is anchored in real numbers and Claude focuses on the strategic
+// "why".
 
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '$env/dynamic/private';
@@ -38,9 +39,11 @@ function seatLine(s: HelperSeatView): string {
 }
 
 function efficiencyBlock(view: HelperView): string {
-	// Numeric grounding only makes sense for a concealed 14-tile hand; meld-aware
-	// shanten isn't modelled here, so fall back to qualitative advice otherwise.
-	if (view.melds.length > 0 || view.hand.length !== 14) return '';
+	// Works for open hands too: the efficiency lib is meld-aware (it derives the
+	// sets-needed from the concealed tile count), so we pass the concealed hand
+	// straight through. Needs a post-draw hand (3n+2 concealed tiles) to rank
+	// discards — always true on the player's turn; guard against malformed input.
+	if (view.hand.length % 3 !== 2) return '';
 	const a = analyzeHand(view.hand);
 	const top = a.ranked
 		.slice(0, 6)

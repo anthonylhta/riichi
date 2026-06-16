@@ -1,7 +1,12 @@
-// Server-side tile-efficiency analysis for the Hand of the Day puzzle.
-// Derives the provably-correct discard from a 14-tile hand using the same
-// mahjong-tile-efficiency RuleSet the AI uses, so the puzzle answer never
-// depends on the LLM getting the maths right.
+// Server-side tile-efficiency analysis. Derives the provably-correct discard from
+// a post-draw concealed hand using the same mahjong-tile-efficiency RuleSet the AI
+// uses, so the puzzle answer (Hand of the Day) never depends on the LLM's maths,
+// and the in-round helper can ground its advice on open hands too.
+//
+// Meld-aware: the RuleSet derives the number of sets still needed from the
+// concealed tile count (floor(len/3)), so passing ONLY the concealed tiles of an
+// open hand (14 − 3·melds) yields correct shanten/ukeire — the lib already accounts
+// for the called sets. See `efficiency.test.ts` and ADR 0069.
 
 import { RuleSet } from 'mahjong-tile-efficiency';
 import { toEffHand } from '$lib/game/tiles';
@@ -44,12 +49,15 @@ export interface HandAnalysis {
 	ukeireTiles: TileCode[]; // the tile *types* that advance the hand
 }
 
-// Analyse a 14-tile hand: rank each distinct discard by shanten then ukeire,
-// and for the optimal discard list the tile types that advance the hand.
-export function analyzeHand(hand14: TileCode[]): HandAnalysis {
-	const distinct = [...new Set(hand14)];
+// Analyse a post-draw concealed hand (14 tiles when closed, 14 − 3·melds when
+// open — any 3n+2 length): rank each distinct discard by shanten then ukeire, and
+// for the optimal discard list the tile types that advance the hand. Meld-aware
+// via the lib's count-derived target (see the file header), so an open hand's
+// concealed tiles are passed straight through.
+export function analyzeHand(hand: TileCode[]): HandAnalysis {
+	const distinct = [...new Set(hand)];
 	const ranked: DiscardOption[] = distinct.map((code) => {
-		const { shanten, ukeire } = calc(removeOne(hand14, code));
+		const { shanten, ukeire } = calc(removeOne(hand, code));
 		return { code, shanten, ukeire };
 	});
 	ranked.sort((a, b) => a.shanten - b.shanten || b.ukeire - a.ukeire);
@@ -60,7 +68,7 @@ export function analyzeHand(hand14: TileCode[]): HandAnalysis {
 		.map((o) => o.code);
 
 	// Which tile types advance the hand after the optimal discard?
-	const remaining = removeOne(hand14, best.code);
+	const remaining = removeOne(hand, best.code);
 	const ukeireTiles: TileCode[] = [];
 	for (let c = 1; c <= 34; c++) {
 		const code = c as TileCode;
