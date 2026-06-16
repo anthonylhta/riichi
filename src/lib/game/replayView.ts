@@ -45,6 +45,28 @@ export interface ReplayStep {
 	outcome?: StepOutcome;
 }
 
+export interface MoveGroup {
+	header: string; // e.g. "東1" or "東1 · 2本場"
+	items: { idx: number; label: string; kind: StepKind }[];
+}
+
+// Group the steps into hands for the move-list sidebar. A new group starts at each
+// deal step, so a renchan's repeated round reads as its own block (with its honba).
+// `idx` is the step index, so a list row can jump the viewer straight to it.
+export function groupMovesByRound(steps: ReplayStep[]): MoveGroup[] {
+	const groups: MoveGroup[] = [];
+	steps.forEach((s, idx) => {
+		if (s.kind === 'deal' || groups.length === 0) {
+			const honba = s.view.honba;
+			groups.push({ header: s.roundLabel + (honba > 0 ? ` · ${honba}本場` : ''), items: [] });
+		}
+		// The deal step's own label repeats the header, so trim it in the list.
+		const label = s.kind === 'deal' ? 'Hands dealt' : s.label;
+		groups[groups.length - 1].items.push({ idx, label, kind: s.kind });
+	});
+	return groups;
+}
+
 function windIndex(seat: Seat, dealer: Seat): number {
 	return (seat - dealer + 4) % 4;
 }
