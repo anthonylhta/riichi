@@ -44,10 +44,11 @@ function seatLine(s: DealInSeat): string {
 	return `${who} (${s.score})${riichi}: discards [${str(s.discards)}]; melds ${melds}`;
 }
 
-// Numeric shape grounding — closed 14-tile hands only, the same limitation as
-// the in-round helper (meld-aware shanten isn't modelled).
+// Numeric shape grounding. analyzeHand is meld-aware (the efficiency lib derives
+// sets-needed from the concealed tile count), so open hands work too — we just
+// need a post-draw concealed hand (3n+2 tiles), always true at a deal-in.
 function shapeBlock(m: DealInMoment): string {
-	if (m.melds.length > 0 || m.hand.length !== 14) return '';
+	if (m.hand.length % 3 !== 2) return '';
 	const a = analyzeHand(m.hand);
 	return `\nHand shape (mahjong-tile-efficiency, authoritative): best discard kept the hand at ${a.bestShanten}-shanten. The hand was ${a.bestShanten === 0 ? 'TENPAI' : `${a.bestShanten} away from tenpai`}.`;
 }
