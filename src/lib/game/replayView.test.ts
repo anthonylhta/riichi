@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReplaySteps } from './replayView';
+import { buildReplaySteps, groupMovesByRound } from './replayView';
 import { initGame, continueGame, humanDiscard, humanPassClaim } from './engine';
 import { settle } from './autoplay';
 import type { GameEvent } from './events';
@@ -136,6 +136,29 @@ describe('buildReplaySteps — synthetic', () => {
 		expect(win.view.players[0].score).toBe(19800);
 		expect(win.view.riichiBets).toBe(0);
 		expect(win.outcome).toMatchObject({ type: 'win', winner: 1, tsumo: false, score: 5200 });
+	});
+
+	it('groups moves by hand, trims the deal label, and keeps step indices for jumping', () => {
+		const drawn = tile(20, 500);
+		const steps = buildReplaySteps([
+			start(),
+			{ type: 'draw', seat: 0, tile: drawn, rinshan: false },
+			{ type: 'discard', seat: 0, tile: drawn, riichi: false },
+			start({ round: 2, dealer: 1 }),
+			{ type: 'draw', seat: 1, tile: tile(21, 600), rinshan: false }
+		]);
+		const groups = groupMovesByRound(steps);
+		expect(groups).toHaveLength(2);
+		expect(groups[0].header).toBe('東1');
+		expect(groups[1].header).toBe('東2');
+		expect(groups[0].items[0].label).toBe('Hands dealt'); // deal label trimmed
+		expect(groups[0].items.map((i) => i.idx)).toEqual([0, 1, 2]);
+		expect(groups[1].items.map((i) => i.idx)).toEqual([3, 4]);
+	});
+
+	it('includes the honba in a renchan group header', () => {
+		const steps = buildReplaySteps([start({ honba: 2 })]);
+		expect(groupMovesByRound(steps)[0].header).toBe('東1 · 2本場');
 	});
 
 	it('ignores the game_end event (no extra step)', () => {

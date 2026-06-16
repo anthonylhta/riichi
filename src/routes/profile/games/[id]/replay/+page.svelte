@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import GameBoard from '$lib/components/game/GameBoard.svelte';
 	import Tile from '$lib/components/Tile.svelte';
-	import type { ReplayStep } from '$lib/game/replayView';
+	import { groupMovesByRound, type ReplayStep } from '$lib/game/replayView';
 	import type { Seat } from '$lib/game/types';
 	import type { PageData } from './$types';
 
@@ -14,6 +14,8 @@
 	let loadError = $state<string | null>(null);
 	let playing = $state(false);
 	let revealAll = $state(false);
+	let showMoves = $state(true);
+	let listEl = $state<HTMLElement | null>(null);
 
 	const WIND_NAMES = ['East', 'South', 'West', 'North'];
 	const windIndex = (seat: Seat, dealer: Seat) => (seat - dealer + 4) % 4;
@@ -26,6 +28,15 @@
 	const atEnd = $derived(!steps || index >= steps.length - 1);
 	const atStart = $derived(index <= 0);
 	const lastIndex = $derived(steps ? steps.length - 1 : 0);
+
+	const moveGroups = $derived(groupMovesByRound(steps ?? []));
+
+	// Keep the active move scrolled into view as playback / stepping moves on.
+	$effect(() => {
+		void index;
+		if (!showMoves || !listEl) return;
+		listEl.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+	});
 
 	onMount(async () => {
 		if (!data.signedIn || !data.hasReplay) {
@@ -142,90 +153,125 @@
 {:else if step && steps}
 	<div class="viewport">
 		<div class="stage">
-			<!-- Top bar: back, round, the step description -->
-			<header class="vh">
-				<a class="back" href="/profile/games/{data.gameId}">← Game</a>
-				<div class="vh-mid">
-					<span class="vh-round">{step.roundWindKanji}{step.roundNumber}</span>
-					<span class="vh-label">{step.label}</span>
-				</div>
-				<label class="reveal">
-					<input type="checkbox" bind:checked={revealAll} />
-					Reveal all
-				</label>
-			</header>
-
-			<GameBoard
-				state={step.view}
-				{seatNames}
-				hoveredCode={null}
-				roundWindKanji={step.roundWindKanji}
-				roundNumber={step.roundNumber}
-				{revealAll}
-			/>
-
-			<!-- Your hand, face-up and non-interactive -->
-			<div class="player-area">
-				{#if step.outcome}
-					<div class="outcome" class:draw={step.outcome.type === 'draw'}>
-						{#if step.outcome.type === 'win'}
-							<span class="outcome-jp">{step.outcome.tsumo ? '自摸' : '栄和'}</span>
-							<span class="outcome-main"
-								>{step.outcome.winnerName}
-								{step.outcome.tsumo ? 'tsumo' : 'ron'} · {step.outcome.han} han / {step.outcome.fu} fu
-								· {step.outcome.score}</span
-							>
-							<span class="outcome-yaku">{step.outcome.yaku.map((y) => y.name).join(', ')}</span>
-						{:else}
-							<span class="outcome-jp">流局</span>
-							<span class="outcome-main">{step.label}</span>
-						{/if}
+			<div class="stage-main">
+				<!-- Top bar: back, round, the step description -->
+				<header class="vh">
+					<a class="back" href="/profile/games/{data.gameId}">← Game</a>
+					<div class="vh-mid">
+						<span class="vh-round">{step.roundWindKanji}{step.roundNumber}</span>
+						<span class="vh-label">{step.label}</span>
 					</div>
-				{/if}
-				<div class="player-hand-row">
-					<div class="player-hand">
-						{#each step.view.players[0].hand as t (t.id)}
-							<Tile tile={t} variant="hand" />
-						{/each}
+					<div class="vh-toggles">
+						<button
+							class="toggle-btn"
+							class:on={showMoves}
+							onclick={() => (showMoves = !showMoves)}
+						>
+							Moves 牌譜
+						</button>
+						<label class="reveal">
+							<input type="checkbox" bind:checked={revealAll} />
+							Reveal all
+						</label>
 					</div>
-					{#if step.view.players[0].melds.length > 0}
-						<div class="player-melds">
-							{#each step.view.players[0].melds as meld, mi (mi)}
-								<div class="meld-group">
-									{#each meld.tiles as t (t.id)}
-										<Tile tile={t} variant="meld" />
-									{/each}
-								</div>
-							{/each}
+				</header>
+
+				<GameBoard
+					state={step.view}
+					{seatNames}
+					hoveredCode={null}
+					roundWindKanji={step.roundWindKanji}
+					roundNumber={step.roundNumber}
+					{revealAll}
+				/>
+
+				<!-- Your hand, face-up and non-interactive -->
+				<div class="player-area">
+					{#if step.outcome}
+						<div class="outcome" class:draw={step.outcome.type === 'draw'}>
+							{#if step.outcome.type === 'win'}
+								<span class="outcome-jp">{step.outcome.tsumo ? '自摸' : '栄和'}</span>
+								<span class="outcome-main"
+									>{step.outcome.winnerName}
+									{step.outcome.tsumo ? 'tsumo' : 'ron'} · {step.outcome.han} han / {step.outcome
+										.fu} fu · {step.outcome.score}</span
+								>
+								<span class="outcome-yaku">{step.outcome.yaku.map((y) => y.name).join(', ')}</span>
+							{:else}
+								<span class="outcome-jp">流局</span>
+								<span class="outcome-main">{step.label}</span>
+							{/if}
 						</div>
 					{/if}
+					<div class="player-hand-row">
+						<div class="player-hand">
+							{#each step.view.players[0].hand as t (t.id)}
+								<Tile tile={t} variant="hand" />
+							{/each}
+						</div>
+						{#if step.view.players[0].melds.length > 0}
+							<div class="player-melds">
+								{#each step.view.players[0].melds as meld, mi (mi)}
+									<div class="meld-group">
+										{#each meld.tiles as t (t.id)}
+											<Tile tile={t} variant="meld" />
+										{/each}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				</div>
+
+				<!-- Transport controls -->
+				<div class="controls">
+					<button class="ctrl" onclick={() => go(0)} disabled={atStart} aria-label="First"
+						>⏮</button
+					>
+					<button class="ctrl" onclick={prev} disabled={atStart} aria-label="Previous">◀</button>
+					<button class="ctrl play" onclick={togglePlay} aria-label="Play/pause">
+						{playing ? '⏸' : '▶'}
+					</button>
+					<button class="ctrl" onclick={next} disabled={atEnd} aria-label="Next">▶</button>
+					<button class="ctrl" onclick={() => go(lastIndex)} disabled={atEnd} aria-label="Last"
+						>⏭</button
+					>
+					<input
+						class="scrub"
+						type="range"
+						min="0"
+						max={steps.length - 1}
+						value={index}
+						oninput={(e) => {
+							playing = false;
+							go(Number(e.currentTarget.value));
+						}}
+					/>
+					<span class="counter">{index + 1} / {steps.length}</span>
 				</div>
 			</div>
 
-			<!-- Transport controls -->
-			<div class="controls">
-				<button class="ctrl" onclick={() => go(0)} disabled={atStart} aria-label="First">⏮</button>
-				<button class="ctrl" onclick={prev} disabled={atStart} aria-label="Previous">◀</button>
-				<button class="ctrl play" onclick={togglePlay} aria-label="Play/pause">
-					{playing ? '⏸' : '▶'}
-				</button>
-				<button class="ctrl" onclick={next} disabled={atEnd} aria-label="Next">▶</button>
-				<button class="ctrl" onclick={() => go(lastIndex)} disabled={atEnd} aria-label="Last"
-					>⏭</button
-				>
-				<input
-					class="scrub"
-					type="range"
-					min="0"
-					max={steps.length - 1}
-					value={index}
-					oninput={(e) => {
-						playing = false;
-						go(Number(e.currentTarget.value));
-					}}
-				/>
-				<span class="counter">{index + 1} / {steps.length}</span>
-			</div>
+			{#if showMoves}
+				<aside class="move-list" bind:this={listEl} aria-label="Move list">
+					{#each moveGroups as g (g.header + '-' + (g.items[0]?.idx ?? 0))}
+						<div class="ml-round">{g.header}</div>
+						{#each g.items as it (it.idx)}
+							<button
+								class="ml-move"
+								data-kind={it.kind}
+								data-active={it.idx === index}
+								class:active={it.idx === index}
+								onclick={() => {
+									playing = false;
+									go(it.idx);
+								}}
+							>
+								{it.label}
+							</button>
+						{/each}
+					{/each}
+				</aside>
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -281,12 +327,23 @@
 		container-type: size;
 		--u: 1cqh;
 		display: flex;
-		flex-direction: column;
-		gap: calc(var(--u) * 1);
+		flex-direction: row;
+		gap: calc(var(--u) * 1.5);
 		padding: calc(var(--u) * 1.5) calc(var(--u) * 2);
 		box-sizing: border-box;
 		background: #0b0a0a;
 		overflow: hidden;
+	}
+
+	/* The board column — the vertical stack (header / board / hand / controls).
+	   The move-list sidebar sits beside it; min-width:0 lets the board shrink. */
+	.stage-main {
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		gap: calc(var(--u) * 1);
 	}
 
 	/* Tile scaling for everything inside the stage (cq units). */
@@ -347,8 +404,31 @@
 	.vh-label {
 		color: #cfc7bb;
 	}
-	.reveal {
+	.vh-toggles {
 		justify-self: end;
+		display: inline-flex;
+		align-items: center;
+		gap: calc(var(--u) * 1.2);
+	}
+	.toggle-btn {
+		background: #1b1916;
+		border: 1px solid #2e2a26;
+		color: #9a9286;
+		border-radius: calc(var(--u) * 0.6);
+		padding: calc(var(--u) * 0.4) calc(var(--u) * 1);
+		font: inherit;
+		font-size: calc(var(--u) * 1.5);
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.toggle-btn:hover {
+		color: #e8e0d5;
+	}
+	.toggle-btn.on {
+		border-color: #c41e3a;
+		color: #e8e0d5;
+	}
+	.reveal {
 		display: inline-flex;
 		align-items: center;
 		gap: calc(var(--u) * 0.6);
@@ -359,6 +439,65 @@
 	.reveal input {
 		accent-color: #c41e3a;
 		cursor: pointer;
+	}
+
+	/* Move list sidebar — the readable transcript; click a line to jump there. */
+	.move-list {
+		flex: none;
+		width: calc(var(--u) * 32);
+		display: flex;
+		flex-direction: column;
+		gap: calc(var(--u) * 0.2);
+		overflow-y: auto;
+		padding: calc(var(--u) * 0.6);
+		border-radius: calc(var(--u) * 1);
+		background: rgba(0, 0, 0, 0.28);
+		border: 1px solid #1c1a17;
+		font-size: calc(var(--u) * 1.5);
+	}
+	.ml-round {
+		position: sticky;
+		top: calc(var(--u) * -0.6);
+		background: #14110f;
+		color: #c8a878;
+		font-family: 'Noto Serif JP', serif;
+		font-size: calc(var(--u) * 1.7);
+		padding: calc(var(--u) * 0.5) calc(var(--u) * 0.6);
+		margin-top: calc(var(--u) * 0.4);
+		border-radius: calc(var(--u) * 0.5);
+		z-index: 1;
+	}
+	.ml-move {
+		text-align: left;
+		background: none;
+		border: none;
+		color: #b7ada0;
+		padding: calc(var(--u) * 0.45) calc(var(--u) * 0.8);
+		border-radius: calc(var(--u) * 0.5);
+		cursor: pointer;
+		font: inherit;
+		font-size: calc(var(--u) * 1.45);
+		line-height: 1.25;
+	}
+	.ml-move:hover {
+		background: rgba(255, 255, 255, 0.05);
+		color: #e8e0d5;
+	}
+	.ml-move[data-kind='win'] {
+		color: #d98b95;
+	}
+	.ml-move[data-kind='draw_end'] {
+		color: #8a8278;
+		font-style: italic;
+	}
+	.ml-move[data-kind='dora'],
+	.ml-move[data-kind='kan'] {
+		color: #c8a878;
+	}
+	.ml-move.active {
+		background: rgba(196, 30, 58, 0.18);
+		color: #f3ece0;
+		box-shadow: inset 2px 0 0 #c41e3a;
 	}
 
 	/* Your hand */
