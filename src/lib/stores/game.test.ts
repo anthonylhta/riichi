@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { get } from 'svelte/store';
 
 // The store reads/writes localStorage only inside functions (never at module
@@ -11,7 +11,14 @@ const storage = new Map<string, string>();
 	clear: () => storage.clear()
 };
 
-import { loadResumableReplay, resumeGame, abandonGame, gameState, gameLog } from './game';
+import {
+	loadResumableReplay,
+	resumeGame,
+	abandonGame,
+	retroSaveLastGame,
+	gameState,
+	gameLog
+} from './game';
 import { initGame, continueGame, humanDiscard, humanPassClaim } from '$lib/game/engine';
 import { settle } from '$lib/game/autoplay';
 import { newReplayLog, wallFromState, type ReplayLog } from '$lib/game/replay';
@@ -54,10 +61,23 @@ async function captureGame(opts: { minRounds: number; stopMidRound: boolean }) {
 	return { log, state };
 }
 
+// Stub fetch for the save POST; default reply mimics a signed-in save.
+function mockFetch(reply: { saved?: boolean } = { saved: true }) {
+	const fn = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
+		async () => ({ json: async () => reply }) as unknown as Response
+	);
+	(globalThis as { fetch?: unknown }).fetch = fn;
+	return fn;
+}
+
+const doneMirror = (log: ReplayLog, saved = false) =>
+	JSON.stringify({ v: 1, status: 'done', saved, log });
+
 beforeEach(() => {
 	storage.clear();
 	gameState.set(null);
 	gameLog.set([]);
+	(globalThis as { fetch?: unknown }).fetch = undefined;
 });
 
 describe('loadResumableReplay — what qualifies for the resume offer', () => {
@@ -137,5 +157,70 @@ describe('resumeGame — a real interrupted game', () => {
 
 		expect(get(gameState)?.phase).toBe('game_end');
 		expect(loadResumableReplay()).toBeNull();
+	}, 60000);
+});
+
+describe('retroSaveLastGame — saving the last anonymous game after sign-in', () => {
+	it('does nothing when there is no mirror', async () => {
+		const fetchFn = mockFetch();
+		await retroSaveLastGame();
+		expect(fetchFn).not.toHaveBeenCalled();
+	});
+
+	it('does nothing for a live (unfinished) mirror', async () => {
+		const fetchFn = mockFetch();
+		storage.set(REPLAY_KEY, liveMirror({ version: 1, startWall: [], inputs: [] }));
+		await retroSaveLastGame();
+		expect(fetchFn).not.toHaveBeenCalled();
+	});
+
+	it('does nothing for an already-saved mirror (idempotent)', async () => {
+		const { log } = await captureGame({ minRounds: 99, stopMidRound: false });
+		const fetchFn = mockFetch();
+		storage.set(REPLAY_KEY, doneMirror(log, true));
+		await retroSaveLastGame();
+		expect(fetchFn).not.toHaveBeenCalled();
+	}, 60000);
+
+	it('does NOT save an abandoned game (done but never reached game_end)', async () => {
+		// A mid-round capture marked done = the exit panel's "Leave" path.
+		const { log, state } = await captureGame({ minRounds: 1, stopMidRound: true });
+		expect(state.phase).not.toBe('game_end');
+		const fetchFn = mockFetch();
+		storage.set(REPLAY_KEY, doneMirror(log));
+		await retroSaveLastGame();
+		expect(fetchFn).not.toHaveBeenCalled();
+	}, 60000);
+
+	it('replays a finished mirror, POSTs the rebuilt game, and locks it saved', async () => {
+		const { log, state } = await captureGame({ minRounds: 99, stopMidRound: false });
+		expect(state.phase).toBe('game_end');
+		const fetchFn = mockFetch({ saved: true });
+		storage.set(REPLAY_KEY, doneMirror(log));
+
+		await retroSaveLastGame();
+
+		expect(fetchFn).toHaveBeenCalledTimes(1);
+		const [url, init] = fetchFn.mock.calls[0];
+		expect(url).toBe('/api/games');
+		const body = JSON.parse(init!.body as string);
+		// Final scores match the replayed game; one round record per finished hand.
+		expect(body.finalScores).toEqual(state.players.map((p) => p.score));
+		const roundsPlayed = log.inputs.filter((i) => i.t === 'nextRound').length;
+		expect(body.rounds).toHaveLength(roundsPlayed);
+		// The mirror is now marked saved so a second sign-in can't double-save.
+		expect(JSON.parse(storage.get(REPLAY_KEY)!).saved).toBe(true);
+	}, 60000);
+
+	it('leaves the mirror eligible when the server did not save (still anonymous)', async () => {
+		const { log } = await captureGame({ minRounds: 99, stopMidRound: false });
+		const fetchFn = mockFetch({ saved: false });
+		storage.set(REPLAY_KEY, doneMirror(log));
+
+		await retroSaveLastGame();
+
+		expect(fetchFn).toHaveBeenCalledTimes(1);
+		// Not locked — a later sign-in can still retro-save it.
+		expect(JSON.parse(storage.get(REPLAY_KEY)!).saved).toBeFalsy();
 	}, 60000);
 });
