@@ -47,9 +47,15 @@ let replayStatus: 'live' | 'done' = 'live';
 
 // What sits under REPLAY_KEY. (Pre-resume mirrors stored the bare ReplayLog;
 // those are unreadable as a wrapper and so are simply never offered for resume.)
+//
+// `saved` marks a finished game already persisted server-side, so the post
+// sign-in retro-save (retroSaveLastGame) can't double-save it. It's absent on a
+// live game and on a finished anonymous game (which was never saved) — both
+// read as falsy, i.e. "not yet saved".
 interface ReplayMirror {
 	v: 1;
 	status: 'live' | 'done';
+	saved?: boolean;
 	log: ReplayLog;
 }
 
@@ -66,6 +72,25 @@ function mirrorReplay() {
 function recordInput(input: ReplayInput) {
 	replayLog.inputs.push(input);
 	mirrorReplay();
+}
+
+// Patch the mirror in place to mark its game as persisted server-side. Read +
+// rewritten directly (not via mirrorReplay) so it operates on whatever finished
+// game currently sits under the key — used both by the normal signed-in save and
+// by the post sign-in retro-save. No mirrorReplay runs after a game ends, so this
+// flag is never clobbered.
+function setSavedFlag() {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		const raw = localStorage.getItem(REPLAY_KEY);
+		if (!raw) return;
+		const mirror = JSON.parse(raw) as ReplayMirror;
+		if (mirror?.v !== 1) return;
+		mirror.saved = true;
+		localStorage.setItem(REPLAY_KEY, JSON.stringify(mirror));
+	} catch {
+		// A missing/corrupt mirror just means nothing to mark.
+	}
 }
 
 // The replay log of the current/last game — JSON-serializable. Use the console
@@ -330,12 +355,72 @@ export async function nextRound() {
 async function saveFinishedGame(state: GameState, log: RoundRecord[]) {
 	try {
 		const finalScores = state.players.map((p) => p.score) as [number, number, number, number];
-		await fetch('/api/games', {
+		const res = await fetch('/api/games', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ finalScores, rounds: log, replay: replayLog })
 		});
+		const data = (await res.json().catch(() => null)) as { saved?: boolean } | null;
+		// Signed-in: mark the mirror saved so the post sign-in retro-save skips it.
+		// Anonymous: saved:false — leave it eligible for retro-save once they sign in.
+		if (data?.saved) setSavedFlag();
 	} catch (e) {
 		console.error('saveFinishedGame failed:', e);
+	}
+}
+
+// Retro-save the last finished game after the player signs in. An anonymous
+// player's finished game is mirrored to localStorage ('done') but never saved —
+// the /api/games POST no-ops without an account. When they sign in (typically via
+// the game-end nudge), this replays that mirror to rebuild its rounds + final
+// scores and saves it against the now-signed-in account, making the nudge's "Sign
+// in to save your games" promise real. Safe to call on every sign-in:
+//   - idempotent — a saved mirror is skipped, and the server marks the mirror
+//     saved so a second call can't duplicate it;
+//   - finished-only — an abandoned/unfinished mirror (status 'done' via the exit
+//     panel but not at game_end) is never persisted (ADR 0039).
+export async function retroSaveLastGame(): Promise<void> {
+	if (typeof localStorage === 'undefined') return;
+	let mirror: ReplayMirror;
+	try {
+		const raw = localStorage.getItem(REPLAY_KEY);
+		if (!raw) return;
+		mirror = JSON.parse(raw) as ReplayMirror;
+	} catch {
+		return;
+	}
+	if (mirror?.v !== 1 || mirror.status !== 'done' || mirror.saved) return;
+	const log = mirror.log;
+	if (!log || log.version !== 1 || !log.startWall || !Array.isArray(log.inputs)) return;
+
+	try {
+		const { states, final } = await replayGame(log);
+		// Only a genuinely finished game is savable; an abandoned game also carries
+		// status 'done' but never reaches game_end.
+		if (final.phase !== 'game_end') return;
+
+		// Rebuild the per-round log exactly as resumeGame does: a round finishes
+		// right before each nextRound input, and states[k] is the state before
+		// input k.
+		const rounds: RoundRecord[] = [];
+		log.inputs.forEach((input, k) => {
+			if (input.t === 'nextRound') {
+				const r = recordRound(states[k]);
+				if (r) rounds.push(r);
+			}
+		});
+		const finalScores = final.players.map((p) => p.score) as [number, number, number, number];
+
+		const res = await fetch('/api/games', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ finalScores, rounds, replay: log })
+		});
+		const data = (await res.json().catch(() => null)) as { saved?: boolean } | null;
+		// Only lock the mirror once the server actually persisted it — a still
+		// anonymous response (saved:false) leaves it eligible for the next sign-in.
+		if (data?.saved) setSavedFlag();
+	} catch (e) {
+		console.error('retroSaveLastGame failed:', e);
 	}
 }

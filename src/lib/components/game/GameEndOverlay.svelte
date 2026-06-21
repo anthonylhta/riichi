@@ -68,11 +68,12 @@
 		{/if}
 
 		<!-- Conversion nudge: games only save for signed-in players (ADR 0039).
-		     Future tense on purpose — this finished game can no longer be saved. -->
+		     Signing in now retro-saves this just-finished game (retroSaveLastGame),
+		     so the nudge promises *this* game, not just future ones. -->
 		<Show when="signed-out">
 			<p class="signin-nudge">
 				<SignInButton mode="modal" class="nudge-signin">Sign in</SignInButton>
-				<span>to save your games and track your stats.</span>
+				<span>to save this game and track your stats.</span>
 			</p>
 		</Show>
 
