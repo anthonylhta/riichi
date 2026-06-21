@@ -122,22 +122,9 @@
 		height: 28px;
 	}
 
-	/* Aka dora (red five) — the SVG face already renders its art in crimson; we keep a
-	   small red dot in the top-right corner as a second, at-a-glance marker. */
-	.red {
-		position: relative;
-	}
-	.red::after {
-		content: '';
-		position: absolute;
-		top: 2px;
-		right: 2px;
-		width: 5px;
-		height: 5px;
-		border-radius: 50%;
-		background: #c41e3a;
-		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
-	}
+	/* Aka dora (red five): the SVG face already marks it twice — the whole face is
+	   crimson and the top-right corner digit is red — so no extra CSS dot (it only
+	   collided with that corner 5). The class:red binding is kept for any future hook. */
 
 	/* Interaction (hand tiles) */
 	button.tile {

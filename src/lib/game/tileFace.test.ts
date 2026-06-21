@@ -11,10 +11,13 @@ describe('tileFaceSvg', () => {
 		}
 	});
 
-	it('draws man tiles as a numeral over 萬', () => {
+	it('draws man tiles two-tone: a near-black numeral over a red 萬', () => {
 		const svg = tileFaceSvg(TC.M3);
 		expect(svg).toContain('三');
 		expect(svg).toContain('萬');
+		// Numeral in near-black ink, 萬 in man red (Mahjong Soul two-tone).
+		expect(svg).toMatch(/fill="#2b2b2b"[^>]*>三<\/text>/);
+		expect(svg).toMatch(/fill="#b3242b"[^>]*>萬<\/text>/);
 	});
 
 	it('draws pin tiles as coins (circles), one ring + centre per pip', () => {
@@ -42,12 +45,16 @@ describe('tileFaceSvg', () => {
 		expect(haku).not.toMatch(/<(text|circle|rect|ellipse|path|line)/);
 	});
 
-	it('adds an MS-style corner digit to number suits (0 for a red five), none to honours', () => {
-		// 3p shows "3" in the corner (plus the value lives nowhere else as text).
+	it('corner digit: real value, red-or-black (never suit), none on honours', () => {
+		// 3p shows "3" in the corner (the value lives nowhere else as text on pin).
 		expect(tileFaceSvg(TC.P3)).toContain('>3</text>');
-		// Red five → "0", the aka marker.
-		expect(tileFaceSvg(TC.M5, true)).toContain('>0</text>');
-		expect(tileFaceSvg(TC.M5, false)).toContain('>5</text>');
+		// A red five shows its real value 5 (not the old "0"), in crimson.
+		const redM5 = tileFaceSvg(TC.M5, true);
+		expect(redM5).not.toContain('>0</text>');
+		expect(redM5).toMatch(/fill="#c41e3a" font-family="'Inter'[^>]*>5<\/text>/);
+		// A plain tile's corner is near-black — NOT its suit colour (pin would be blue).
+		expect(tileFaceSvg(TC.P3)).toMatch(/fill="#2b2b2b" font-family="'Inter'[^>]*>3<\/text>/);
+		expect(tileFaceSvg(TC.M5, false)).toMatch(/fill="#2b2b2b" font-family="'Inter'[^>]*>5<\/text>/);
 		// Honours have no corner digit.
 		expect(tileFaceSvg(TC.EAST)).not.toMatch(/>\d<\/text>/);
 	});

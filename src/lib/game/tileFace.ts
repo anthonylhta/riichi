@@ -13,6 +13,9 @@ const WIND = '#2b2b2b';
 const HATSU = '#1f7a34';
 const CHUN = '#c41e3a';
 const AKA = '#c41e3a';
+// Near-black ink (the off-black used for winds): the man numeral and the corner
+// index ride this so they read as "value" without competing with the suit colour.
+const INK_DARK = '#2b2b2b';
 
 const MAN_NUMERALS = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const WIND_KANJI = ['', '東', '南', '西', '北'];
@@ -202,17 +205,19 @@ function bird(ink: string): string {
 	);
 }
 
-// MS-style top-right index: a small digit on the number suits for quick reading
-// (a red five shows 0 — both the Mahjong Soul aka marker and a glance-able flag).
-// Honours carry no index; their kanji already identifies them.
+// MS-style top-right index: a small digit on the number suits for quick reading.
+// It always shows the tile's real value (a red five reads 5, not 0 — the 0 was
+// a text-notation aka marker that looked like a literal zero on the face), and is
+// coloured by aka-or-not — crimson for a red five, near-black otherwise — never by
+// suit, so the digit reads cleanly without echoing the suit colour. Honours carry
+// no index; their kanji already identifies them.
 function cornerIndex(suit: string, value: number, red: boolean): string {
 	if (suit !== 'man' && suit !== 'pin' && suit !== 'sou') return '';
-	const digit = red ? '0' : String(value);
-	const ink = red ? AKA : inkFor(suit, value, false);
+	const ink = red ? AKA : INK_DARK;
 	return (
 		`<text x="80" y="20" font-size="23" fill="${ink}"` +
 		` font-family="'Inter',system-ui,sans-serif" font-weight="700"` +
-		` text-anchor="middle" dominant-baseline="central">${digit}</text>`
+		` text-anchor="middle" dominant-baseline="central">${value}</text>`
 	);
 }
 
@@ -223,7 +228,13 @@ function faceContent(code: TileCode, red: boolean): string {
 	const idx = cornerIndex(suit, value, red);
 
 	if (suit === 'man') {
-		return kanjiText(MAN_NUMERALS[value], 45, 34, 50, ink) + kanjiText('萬', 45, 86, 44, ink) + idx;
+		// Two-tone like Mahjong Soul: the numeral in near-black, 萬 in suit red. This
+		// also keeps a normal 5m (black numeral) clearly distinct from the aka 5m
+		// (whole face crimson), which an all-red man face blurred together.
+		const numInk = red ? ink : INK_DARK;
+		return (
+			kanjiText(MAN_NUMERALS[value], 45, 34, 50, numInk) + kanjiText('萬', 45, 86, 44, ink) + idx
+		);
 	}
 	if (suit === 'pin') {
 		return (PIN_COINS[value] ?? []).map((c) => coin(c, ink)).join('') + idx;
