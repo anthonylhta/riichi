@@ -40,8 +40,8 @@ the mahjong libraries — Claude just teaches).
 - **Post-game overview** — a short narrative of where a game turned and what to do
   differently. Your client flags a handful of key moments first, so only those are sent to
   Claude — focused coaching instead of a wall of stats.
-- **Hand of the Day** — one shared daily "best discard" puzzle for everyone. Claude invents
-  the hand and writes the explanation, but the **correct answer is computed from the
+- **Hand of the Day** — one shared daily "best discard" puzzle for everyone, drawn from a
+  curated set of hand-picked positions; the **correct answer is computed from the
   efficiency library**, so it's provably right. Sign in to build a daily streak.
 
 ## Accounts

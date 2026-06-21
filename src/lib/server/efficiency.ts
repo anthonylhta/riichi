@@ -25,6 +25,13 @@ function calc(codes: TileCode[]): { shanten: number; ukeire: number } {
 	}
 }
 
+// Shanten of a hand as-is (no discard). -1 means it's already a complete winning
+// hand — used to reject a Hand-of-the-Day puzzle whose 14-tile hand is a win (you'd
+// tsumo, not discard).
+export function shantenOf(codes: TileCode[]): number {
+	return calc(codes).shanten;
+}
+
 function removeOne(codes: TileCode[], code: TileCode): TileCode[] {
 	const i = codes.indexOf(code);
 	if (i < 0) return codes.slice();

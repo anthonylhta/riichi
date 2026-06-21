@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getOrCreateToday, toAnswer } from '$lib/server/handOfTheDay';
+import { getTodayPuzzle, toAnswer } from '$lib/server/handOfTheDay';
 import { getOrCreateUser } from '$lib/server/users';
 import { recordResult, computeStreak } from '$lib/server/streak';
 import type { TileCode } from '$lib/game/tiles';
@@ -22,7 +22,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return json({ error: 'Invalid tile' }, { status: 400 });
 	}
 
-	const today = await getOrCreateToday();
+	const today = getTodayPuzzle();
 	if (!today.puzzle.hand.includes(choiceCode)) {
 		return json({ error: 'Tile not in hand' }, { status: 400 });
 	}

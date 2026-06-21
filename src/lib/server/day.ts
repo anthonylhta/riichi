@@ -13,3 +13,12 @@ export function addDays(date: string, delta: number): string {
 	d.setUTCDate(d.getUTCDate() + delta);
 	return d.toISOString().slice(0, 10);
 }
+
+// Whole days from `from` to `to` (both 'YYYY-MM-DD'), via the same UTC-midnight
+// anchor, so it's DST-safe. Negative if `to` precedes `from`. Used to index the
+// curated Hand-of-the-Day curriculum by the day number since its epoch.
+export function daysSince(from: string, to: string): number {
+	const a = Date.parse(from + 'T00:00:00Z');
+	const b = Date.parse(to + 'T00:00:00Z');
+	return Math.round((b - a) / 86_400_000);
+}

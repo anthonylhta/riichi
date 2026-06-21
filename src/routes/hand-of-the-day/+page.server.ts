@@ -1,15 +1,16 @@
 import type { PageServerLoad } from './$types';
-import { getOrCreateToday, toPublicPuzzle, toAnswer } from '$lib/server/handOfTheDay';
+import { getTodayPuzzle, toPublicPuzzle, toAnswer } from '$lib/server/handOfTheDay';
 import { getOrCreateUser } from '$lib/server/users';
 import { computeStreak, getResult } from '$lib/server/streak';
 import { sydneyDate } from '$lib/server/day';
 import type { StreakInfo, DayResult } from '$lib/game/hotd';
 
-// The puzzle is streamed (see ADR 0034) so the shell paints instantly. The answer
-// is withheld from the payload — it's revealed only after a tile is submitted
-// (POST /api/hand-of-the-day/answer), so streaks can be graded server-side — UNLESS
-// the signed-in user already answered today, in which case we send the solved state
-// (their locked choice + the revealed answer) so a revisit shows their result.
+// The puzzle is now curated (no API/DB lookup), so it's derived synchronously and
+// returned directly — no streaming needed. The answer is still withheld from the
+// payload, revealed only after a tile is submitted (POST /api/hand-of-the-day/answer)
+// so streaks are graded server-side — UNLESS the signed-in user already answered
+// today, in which case we send the solved state (their locked choice + the revealed
+// answer) so a revisit shows their result.
 export const load: PageServerLoad = async ({ locals }) => {
 	const clerkId = locals.auth().userId;
 	const date = sydneyDate();
@@ -23,22 +24,27 @@ export const load: PageServerLoad = async ({ locals }) => {
 	}
 	const answered = result !== null;
 
-	const puzzle = getOrCreateToday()
-		.then((today) => ({
+	try {
+		const today = getTodayPuzzle(date);
+		return {
 			today: {
 				date: today.date,
 				puzzle: toPublicPuzzle(today.puzzle),
 				answer: answered ? toAnswer(today.puzzle) : null
 			},
-			error: null as string | null
-		}))
-		.catch((e) => {
-			console.error('Hand of the Day failed:', e);
-			return {
-				today: null,
-				error: 'Could not load today’s puzzle. Please try again later.' as string | null
-			};
-		});
-
-	return { puzzle, signedIn, streak, result };
+			error: null as string | null,
+			signedIn,
+			streak,
+			result
+		};
+	} catch (e) {
+		console.error('Hand of the Day failed:', e);
+		return {
+			today: null,
+			error: 'Could not load today’s puzzle. Please try again later.' as string | null,
+			signedIn,
+			streak,
+			result
+		};
+	}
 };

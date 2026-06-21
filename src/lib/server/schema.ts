@@ -60,8 +60,11 @@ export const games = pgTable('games', {
 	createdAt: timestamp('created_at').defaultNow().notNull()
 });
 
-// One shared riichi puzzle per day, cached so Claude generates it only once.
-// `date` is the UTC 'YYYY-MM-DD' key; `puzzle` holds the full puzzle payload.
+// NOTE: as of ADR 0073 the daily puzzle is a curated, version-controlled pool
+// (src/lib/server/puzzles.ts) with the answer derived deterministically at read
+// time, so nothing reads or writes this table anymore. It's kept (not dropped) so
+// the old Claude-generated + cached flow can be restored later without a migration.
+// Streaks key on `puzzle_results` (above) by date, independent of this table.
 export const handOfTheDay = pgTable('hand_of_the_day', {
 	date: text('date').primaryKey(),
 	puzzle: jsonb('puzzle').notNull(),

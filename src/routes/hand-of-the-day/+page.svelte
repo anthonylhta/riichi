@@ -14,26 +14,16 @@
 		<span class="head-spacer" aria-hidden="true"></span>
 	</header>
 
-	{#await data.puzzle}
-		<!-- Page shell paints instantly; the first visit of the day generates the
-		     puzzle behind this skeleton instead of stalling the navigation. -->
-		<div class="loading" aria-live="polite">
-			<div class="spinner"></div>
-			<p class="loading-jp">今日の手牌を作成中…</p>
-			<p class="loading-en">Preparing today's puzzle…</p>
-		</div>
-	{:then loaded}
-		{#if loaded.error || !loaded.today}
-			<p class="error">{loaded.error ?? 'No puzzle available.'}</p>
-		{:else}
-			<PuzzleView
-				today={loaded.today}
-				result={data.result}
-				streak={data.streak}
-				signedIn={data.signedIn}
-			/>
-		{/if}
-	{/await}
+	{#if data.error || !data.today}
+		<p class="error">{data.error ?? 'No puzzle available.'}</p>
+	{:else}
+		<PuzzleView
+			today={data.today}
+			result={data.result}
+			streak={data.streak}
+			signedIn={data.signedIn}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -91,43 +81,6 @@
 		font-size: 1.5rem;
 		font-weight: 700;
 		letter-spacing: 0.02em;
-	}
-
-	.loading {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.6rem;
-		padding: 3rem 0;
-	}
-	.spinner {
-		width: 2rem;
-		height: 2rem;
-		border: 2px solid #2a2724;
-		border-top-color: #c41e3a;
-		border-radius: 50%;
-		animation: spin 0.8s linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.spinner {
-			animation-duration: 2s;
-		}
-	}
-	.loading-jp {
-		font-family: 'Noto Serif JP', serif;
-		color: #c41e3a;
-		font-size: 1rem;
-		margin: 0;
-	}
-	.loading-en {
-		color: #6a6258;
-		font-size: 0.82rem;
-		margin: 0;
 	}
 
 	.error {
