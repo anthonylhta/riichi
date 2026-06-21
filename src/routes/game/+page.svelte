@@ -20,8 +20,10 @@
 		gameLog,
 		loadResumableReplay,
 		resumeGame,
-		abandonGame
+		abandonGame,
+		retroSaveLastGame
 	} from '$lib/stores/game';
+	import { useClerkContext } from 'svelte-clerk/client';
 	import type { ReplayLog } from '$lib/game/replay';
 	import { tileLabel } from '$lib/game/tiles';
 	import { isTenpaiAfterDiscard } from '$lib/game/ai';
@@ -126,6 +128,26 @@
 			return;
 		}
 		await startGame();
+	});
+
+	// Retro-save the last finished game once the player is signed in. Anonymous
+	// players who finish a game and then sign in (via the game-end nudge) get that
+	// game saved to their new account. Fires once per signed-in session — on the
+	// signed-out → signed-in transition, or on load if already signed in (covering
+	// a stale anonymous game from a prior session). retroSaveLastGame is idempotent,
+	// so a re-fire is harmless; re-armed on sign-out.
+	const clerk = useClerkContext();
+	let retroAttempted = false;
+	$effect(() => {
+		if (!clerk.isLoaded) return;
+		if (clerk.auth.userId) {
+			if (!retroAttempted) {
+				retroAttempted = true;
+				void retroSaveLastGame();
+			}
+		} else {
+			retroAttempted = false;
+		}
 	});
 
 	async function acceptResume() {

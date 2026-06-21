@@ -53,7 +53,7 @@ export const games = pgTable('games', {
 	rounds: jsonb('rounds').notNull(),
 	liked: boolean('liked').default(false).notNull(),
 	replay: jsonb('replay'),
-	// Cached tile-level review (ReviewedDealIn[], server-authored — ADR 0055).
+	// Cached tile-level review (ReviewedMoment[], server-authored — ADR 0055).
 	// A saved game is immutable, so the verdicts never go stale; null until the
 	// owner first runs the review.
 	tileReview: jsonb('tile_review'),

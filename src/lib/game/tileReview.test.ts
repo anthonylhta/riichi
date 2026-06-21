@@ -1,13 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { initGame, continueGame, humanDiscard, humanPassClaim } from './engine';
 import { settle } from './autoplay';
-import { dealInMoments, mergeReviewedDealIns } from './tileReview';
-import type { DealInMoment, TileReviewResult } from './tileReview';
+import { reviewMoments, mergeReviewedMoments } from './tileReview';
+import type { DealInMoment, RiichiMoment, TileMoment, TileReviewResult } from './tileReview';
 import type { GameState, Seat } from './types';
 import type { GameEvent, Scores } from './events';
 import type { GameTile } from './tiles';
 
 const tile = (code: number, id = 0, isRed = false): GameTile => ({ code, id, isRed });
+const dealIns = (ms: TileMoment[]) => ms.filter((m): m is DealInMoment => m.kind === 'deal-in');
+const riichis = (ms: TileMoment[]) => ms.filter((m): m is RiichiMoment => m.kind === 'riichi');
 
 // ─── synthetic-event helpers ─────────────────────────────────────────────────
 
@@ -59,21 +61,23 @@ const win = (seat: Seat, from: Seat, score = 8000): GameEvent => ({
 	uraIndicators: []
 });
 
-describe('dealInMoments — extraction', () => {
+describe('reviewMoments — deal-in extraction', () => {
 	it('captures the decision state of a discard that got ronned', () => {
 		const drawn = tile(33, 50);
-		const moments = dealInMoments([
-			start(),
-			// Seat 2 declares riichi on a 6p, then passes on seat 3's 9s.
-			draw(2, tile(15, 60)),
-			discard(2, tile(15, 60), true),
-			draw(3, tile(27, 61)),
-			discard(3, tile(27, 61)),
-			// Your turn: draw a green dragon and deal it in.
-			draw(0, drawn),
-			discard(0, drawn),
-			win(2, 0)
-		]);
+		const moments = dealIns(
+			reviewMoments([
+				start(),
+				// Seat 2 declares riichi on a 6p, then passes on seat 3's 9s.
+				draw(2, tile(15, 60)),
+				discard(2, tile(15, 60), true),
+				draw(3, tile(27, 61)),
+				discard(3, tile(27, 61)),
+				// Your turn: draw a green dragon and deal it in.
+				draw(0, drawn),
+				discard(0, drawn),
+				win(2, 0)
+			])
+		);
 
 		expect(moments).toHaveLength(1);
 		const m = moments[0];
@@ -97,24 +101,26 @@ describe('dealInMoments — extraction', () => {
 	});
 
 	it('lists genbutsu you actually held, including tiles called away from the river', () => {
-		const moments = dealInMoments([
-			start(),
-			// Seat 2 discards a 1m (your hand holds 1m), then seat 1 pons it away.
-			draw(2, tile(1, 60)),
-			discard(2, tile(1, 60)),
-			{
-				type: 'call',
-				call: 'pon',
-				seat: 1,
-				from: 2,
-				tile: tile(1, 60),
-				consumed: [tile(1, 61), tile(1, 62)]
-			},
-			discard(1, tile(9, 63)),
-			draw(0, tile(33, 50)),
-			discard(0, tile(33, 50)),
-			win(2, 0)
-		]);
+		const moments = dealIns(
+			reviewMoments([
+				start(),
+				// Seat 2 discards a 1m (your hand holds 1m), then seat 1 pons it away.
+				draw(2, tile(1, 60)),
+				discard(2, tile(1, 60)),
+				{
+					type: 'call',
+					call: 'pon',
+					seat: 1,
+					from: 2,
+					tile: tile(1, 60),
+					consumed: [tile(1, 61), tile(1, 62)]
+				},
+				discard(1, tile(9, 63)),
+				draw(0, tile(33, 50)),
+				discard(0, tile(33, 50)),
+				win(2, 0)
+			])
+		);
 
 		const m = moments[0];
 		// 1m left seat 2's displayed river when ponned…
@@ -123,16 +129,22 @@ describe('dealInMoments — extraction', () => {
 		expect(m.safeTiles).toEqual([1]);
 	});
 
-	it('flags a riichi tsumogiri as forced, but not the declaring discard itself', () => {
-		const declaring = dealInMoments([
+	it('reviews a riichi declaration; a later forced tsumogiri deal-in dedups into it', () => {
+		// The declaring discard itself deals in: a (non-forced) deal-in is kept
+		// alongside the riichi-declaration moment.
+		const declaring = reviewMoments([
 			start(),
 			draw(0, tile(33, 50)),
 			discard(0, tile(33, 50), true), // the riichi declaration deals in
 			win(1, 0)
 		]);
-		expect(declaring[0].forcedByRiichi).toBe(false);
+		expect(dealIns(declaring)).toHaveLength(1);
+		expect(dealIns(declaring)[0].forcedByRiichi).toBe(false);
+		expect(riichis(declaring)).toHaveLength(1);
 
-		const locked = dealInMoments([
+		// Riichi, then a later forced tsumogiri deals in. The forced deal-in is the
+		// same decision as the riichi — dropped in favour of the riichi moment.
+		const locked = reviewMoments([
 			start(),
 			draw(0, tile(33, 50)),
 			discard(0, tile(33, 50), true), // declaration passes
@@ -142,11 +154,31 @@ describe('dealInMoments — extraction', () => {
 			discard(0, tile(34, 51)), // forced tsumogiri
 			win(1, 0)
 		]);
-		expect(locked[0].forcedByRiichi).toBe(true);
+		expect(dealIns(locked)).toHaveLength(0);
+		expect(riichis(locked)).toHaveLength(1);
+		expect(riichis(locked)[0].riichiTile).toBe(33);
+	});
+
+	it('extracts a riichi declaration with its wait-snapshot fields', () => {
+		const moments = riichis(
+			reviewMoments([
+				start(),
+				draw(0, tile(33, 50)),
+				discard(0, tile(33, 50), true), // you declare riichi cutting a green dragon
+				draw(1, tile(9, 60)),
+				discard(1, tile(9, 60)) // round runs on; no deal-in
+			])
+		);
+		expect(moments).toHaveLength(1);
+		expect(moments[0].kind).toBe('riichi');
+		expect(moments[0].riichiTile).toBe(33);
+		expect(moments[0].turn).toBe(1);
+		// No opponent was in riichi, so there are no fold-safe tiles to list.
+		expect(moments[0].safeTiles).toEqual([]);
 	});
 
 	it('does not turn a robbed kakan (chankan) into a discard moment', () => {
-		const moments = dealInMoments([
+		const moments = reviewMoments([
 			start(),
 			draw(0, tile(31, 50)),
 			{
@@ -160,29 +192,37 @@ describe('dealInMoments — extraction', () => {
 		expect(moments).toHaveLength(0);
 	});
 
-	it('keeps the 3 costliest deal-ins, in game order', () => {
+	it('caps total moments at 5, costliest deal-ins first, then game order', () => {
 		const dealIn = (round: number, score: number): GameEvent[] => [
 			start({ round }),
 			draw(0, tile(33, 50)),
 			discard(0, tile(33, 50)),
 			win(1, 0, score)
 		];
-		const moments = dealInMoments([
-			...dealIn(1, 1000),
-			...dealIn(2, 12000),
-			...dealIn(3, 2000),
-			...dealIn(4, 8000)
-		]);
+		// Six deal-ins → only the single cheapest (1000) is dropped by the 5-cap.
+		const moments = dealIns(
+			reviewMoments([
+				...dealIn(1, 1000),
+				...dealIn(2, 12000),
+				...dealIn(3, 2000),
+				...dealIn(4, 8000),
+				...dealIn(5, 1500),
+				...dealIn(6, 5000)
+			])
+		);
 		expect(moments.map((m) => [m.round, m.winner.score])).toEqual([
 			[2, 12000],
 			[3, 2000],
-			[4, 8000]
+			[4, 8000],
+			[5, 1500],
+			[6, 5000]
 		]);
 	});
 });
 
-describe('mergeReviewedDealIns — the cacheable shape', () => {
+describe('mergeReviewedMoments — the cacheable shape', () => {
 	const moment = (round: number, honba: number, dealInTile: number): DealInMoment => ({
+		kind: 'deal-in',
 		round,
 		honba,
 		turn: 5,
@@ -196,6 +236,19 @@ describe('mergeReviewedDealIns — the cacheable shape', () => {
 		winner: { seat: 2, han: 4, fu: 30, score: 8000, yaku: [] },
 		seats: []
 	});
+	const riichiMoment = (round: number, riichiTile: number): RiichiMoment => ({
+		kind: 'riichi',
+		round,
+		honba: 0,
+		turn: 6,
+		tilesLeft: 30,
+		doraIndicators: [10],
+		hand: [1, 2, 3, riichiTile],
+		melds: [],
+		safeTiles: [],
+		seats: [],
+		riichiTile
+	});
 
 	it('keeps only the card identity + verdict, dropping the decision snapshot', () => {
 		const moments = [moment(2, 0, 33), moment(3, 1, 14)];
@@ -206,10 +259,11 @@ describe('mergeReviewedDealIns — the cacheable shape', () => {
 			]
 		};
 
-		const merged = mergeReviewedDealIns(moments, result);
+		const merged = mergeReviewedMoments(moments, result);
 
 		expect(merged).toEqual([
 			{
+				kind: 'deal-in',
 				round: 2,
 				honba: 0,
 				dealInTile: 33,
@@ -218,6 +272,7 @@ describe('mergeReviewedDealIns — the cacheable shape', () => {
 				advice: 'You held a safe 6p.'
 			},
 			{
+				kind: 'deal-in',
 				round: 3,
 				honba: 1,
 				dealInTile: 14,
@@ -231,14 +286,19 @@ describe('mergeReviewedDealIns — the cacheable shape', () => {
 		expect(merged[0]).not.toHaveProperty('seats');
 	});
 
-	it('preserves the forced-riichi flag and pairs verdicts by index', () => {
-		const m = moment(1, 0, 28);
-		m.forcedByRiichi = true;
-		const merged = mergeReviewedDealIns([m], {
-			verdicts: [{ verdict: 'justified', advice: 'Locked in riichi.' }]
+	it('carries the riichi tile as the focal tile (forcedByRiichi false)', () => {
+		const merged = mergeReviewedMoments([riichiMoment(1, 28)], {
+			verdicts: [{ verdict: 'justified', advice: 'Good wait — riichi was right.' }]
 		});
-		expect(merged[0].forcedByRiichi).toBe(true);
-		expect(merged[0].verdict).toBe('justified');
+		expect(merged[0]).toEqual({
+			kind: 'riichi',
+			round: 1,
+			honba: 0,
+			dealInTile: 28, // focal tile = the riichi discard
+			forcedByRiichi: false,
+			verdict: 'justified',
+			advice: 'Good wait — riichi was right.'
+		});
 	});
 });
 
@@ -264,12 +324,12 @@ async function playGame(maxInputs: number): Promise<GameState> {
 	return state;
 }
 
-describe('dealInMoments — real games', () => {
+describe('reviewMoments — real games', () => {
 	it('extracted moments are internally consistent', async () => {
 		// A tsumogiri human deals in regularly; find a game with at least one.
 		for (let g = 0; g < 6; g++) {
 			const live = await playGame(400);
-			const moments = dealInMoments(live.events);
+			const moments = dealIns(reviewMoments(live.events));
 			if (moments.length === 0) continue;
 
 			for (const m of moments) {

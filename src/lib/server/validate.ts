@@ -12,7 +12,7 @@ import type { HelperMeld, HelperSeatView, HelperView } from '$lib/game/helper';
 import type { ReviewMoment, ReviewPayload, RoundRecord } from '$lib/game/review';
 import type { ReplayInput, ReplayLog } from '$lib/game/replay';
 import type { GameTile } from '$lib/game/tiles';
-import type { DealInMoment, DealInSeat } from '$lib/game/tileReview';
+import type { DealInSeat, TileMoment } from '$lib/game/tileReview';
 
 // Generous upper bounds for a legal game state.
 const MAX_DISCARDS = 30; // a single pond can't realistically exceed ~24
@@ -319,7 +319,7 @@ function replayInput(v: unknown): ReplayInput | null {
 
 // ── Tile review (/api/tile-review) ──────────────────────────────────────────
 
-const MAX_TILE_MOMENTS = 3;
+const MAX_TILE_MOMENTS = 5;
 
 function dealInSeat(v: unknown): DealInSeat | null {
 	if (typeof v !== 'object' || v === null) return null;
@@ -346,9 +346,8 @@ function dealInSeat(v: unknown): DealInSeat | null {
 	};
 }
 
-function dealInMoment(v: unknown): DealInMoment | null {
-	if (typeof v !== 'object' || v === null) return null;
-	const m = v as Record<string, unknown>;
+// The visible-state snapshot every tile-review moment kind shares.
+function tileMomentBase(m: Record<string, unknown>) {
 	const doraIndicators = tileArray(m.doraIndicators, MAX_DORA);
 	const hand = tileArray(m.hand, 14);
 	const ownMelds = melds(m.melds);
@@ -362,17 +361,52 @@ function dealInMoment(v: unknown): DealInMoment | null {
 		!hand ||
 		hand.length === 0 ||
 		!ownMelds ||
-		!isTile(m.dealInTile) ||
-		typeof m.forcedByRiichi !== 'boolean' ||
 		!safeTiles ||
-		typeof m.winner !== 'object' ||
-		m.winner === null ||
 		!Array.isArray(m.seats) ||
 		m.seats.length !== 4
 	) {
 		return null;
 	}
+	const seats: DealInSeat[] = [];
+	for (const s of m.seats) {
+		const seat = dealInSeat(s);
+		if (!seat) return null;
+		seats.push(seat);
+	}
+	return {
+		round: m.round,
+		honba: m.honba,
+		turn: m.turn,
+		tilesLeft: m.tilesLeft,
+		doraIndicators,
+		hand,
+		melds: ownMelds,
+		safeTiles,
+		seats
+	};
+}
 
+function tileMoment(v: unknown): TileMoment | null {
+	if (typeof v !== 'object' || v === null) return null;
+	const m = v as Record<string, unknown>;
+	const base = tileMomentBase(m);
+	if (!base) return null;
+
+	if (m.kind === 'riichi') {
+		if (!isTile(m.riichiTile)) return null;
+		return { ...base, kind: 'riichi', riichiTile: m.riichiTile };
+	}
+
+	// Deal-in (the only other kind; reject anything unexpected).
+	if (m.kind !== 'deal-in') return null;
+	if (
+		!isTile(m.dealInTile) ||
+		typeof m.forcedByRiichi !== 'boolean' ||
+		typeof m.winner !== 'object' ||
+		m.winner === null
+	) {
+		return null;
+	}
 	const w = m.winner as Record<string, unknown>;
 	if (
 		!isInt(w.seat, 1, 3) ||
@@ -391,41 +425,26 @@ function dealInMoment(v: unknown): DealInMoment | null {
 		if (typeof name !== 'string' || name.length > MAX_YAKU_NAME || !isInt(han, 0, 200)) return null;
 		yaku.push({ name, han });
 	}
-
-	const seats: DealInSeat[] = [];
-	for (const s of m.seats) {
-		const seat = dealInSeat(s);
-		if (!seat) return null;
-		seats.push(seat);
-	}
-
 	return {
-		round: m.round,
-		honba: m.honba,
-		turn: m.turn,
-		tilesLeft: m.tilesLeft,
-		doraIndicators,
-		hand,
-		melds: ownMelds,
+		...base,
+		kind: 'deal-in',
 		dealInTile: m.dealInTile,
 		forcedByRiichi: m.forcedByRiichi,
-		safeTiles,
-		winner: { seat: w.seat, han: w.han, fu: w.fu, score: w.score, yaku },
-		seats
+		winner: { seat: w.seat, han: w.han, fu: w.fu, score: w.score, yaku }
 	};
 }
 
-// Validates the deal-in moments posted to /api/tile-review — each lands in a
+// Validates the review moments posted to /api/tile-review — each lands in a
 // Claude prompt, so everything is rebuilt from bounds-checked fields.
-export function validateDealInMoments(body: unknown): DealInMoment[] | null {
+export function validateTileMoments(body: unknown): TileMoment[] | null {
 	if (typeof body !== 'object' || body === null) return null;
 	const b = body as Record<string, unknown>;
 	if (!Array.isArray(b.moments) || b.moments.length === 0 || b.moments.length > MAX_TILE_MOMENTS) {
 		return null;
 	}
-	const out: DealInMoment[] = [];
+	const out: TileMoment[] = [];
 	for (const m of b.moments) {
-		const moment = dealInMoment(m);
+		const moment = tileMoment(m);
 		if (!moment) return null;
 		out.push(moment);
 	}

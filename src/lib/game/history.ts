@@ -4,7 +4,7 @@
 // labels and per-round text, reuse SEAT_NAMES/roundTag/summarize from ./review.
 
 import type { RoundRecord } from './review';
-import type { ReviewedDealIn } from './tileReview';
+import type { ReviewedMoment } from './tileReview';
 
 // One saved game as shown in the history list.
 export interface GameListItem {
@@ -28,7 +28,7 @@ export interface GameDetail {
 	liked: boolean;
 	rounds: RoundRecord[];
 	hasReplay: boolean;
-	tileReview: ReviewedDealIn[] | null; // cached verdicts, null until first run
+	tileReview: ReviewedMoment[] | null; // cached verdicts, null until first run
 }
 
 const PLACE = ['1st', '2nd', '3rd', '4th'] as const;

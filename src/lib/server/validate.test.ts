@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-	validateDealInMoments,
+	validateTileMoments,
 	validateHelperView,
 	validateReplayLog,
 	validateReviewPayload,
@@ -229,8 +229,18 @@ describe('validateReplayLog', () => {
 	});
 });
 
-describe('validateDealInMoments', () => {
+describe('validateTileMoments', () => {
+	const seats = () =>
+		[0, 1, 2, 3].map((seat) => ({
+			seat,
+			isYou: seat === 0,
+			isRiichi: seat === 2,
+			score: 25000,
+			discards: [15, 27],
+			melds: []
+		}));
 	const goodMoment = () => ({
+		kind: 'deal-in',
 		round: 2,
 		honba: 1,
 		turn: 9,
@@ -242,43 +252,68 @@ describe('validateDealInMoments', () => {
 		forcedByRiichi: false,
 		safeTiles: [15],
 		winner: { seat: 2, han: 4, fu: 30, score: 8000, yaku: [{ name: 'Riichi', han: 1 }] },
-		seats: [0, 1, 2, 3].map((seat) => ({
-			seat,
-			isYou: seat === 0,
-			isRiichi: seat === 2,
-			score: 25000,
-			discards: [15, 27],
-			melds: []
-		}))
+		seats: seats()
+	});
+	const goodRiichi = () => ({
+		kind: 'riichi',
+		round: 1,
+		honba: 0,
+		turn: 6,
+		tilesLeft: 50,
+		doraIndicators: [10],
+		hand: [1, 2, 3, 7, 8, 9, 13, 14, 15, 19, 20, 28, 28, 33],
+		melds: [],
+		safeTiles: [],
+		seats: seats(),
+		riichiTile: 33
 	});
 
-	it('accepts a well-formed payload and rebuilds it', () => {
-		const out = validateDealInMoments({ moments: [goodMoment()], extra: 'dropped' });
+	it('accepts a well-formed deal-in payload and rebuilds it', () => {
+		const out = validateTileMoments({ moments: [goodMoment()], extra: 'dropped' });
 		expect(out).toHaveLength(1);
-		expect(out![0].dealInTile).toBe(33);
-		expect(out![0].winner.score).toBe(8000);
+		const m = out![0];
+		expect(m.kind).toBe('deal-in');
+		if (m.kind !== 'deal-in') return;
+		expect(m.dealInTile).toBe(33);
+		expect(m.winner.score).toBe(8000);
+	});
+
+	it('accepts a riichi moment (no winner) and a missing kind is rejected', () => {
+		const out = validateTileMoments({ moments: [goodRiichi()] });
+		expect(out).toHaveLength(1);
+		const m = out![0];
+		expect(m.kind).toBe('riichi');
+		if (m.kind !== 'riichi') return;
+		expect(m.riichiTile).toBe(33);
+
+		// A deal-in payload missing its winner is rejected.
+		const noWinner = goodMoment() as Record<string, unknown>;
+		delete noWinner.winner;
+		expect(validateTileMoments({ moments: [noWinner] })).toBeNull();
+		// An unknown/absent kind is rejected.
+		const noKind = goodMoment() as Record<string, unknown>;
+		delete noKind.kind;
+		expect(validateTileMoments({ moments: [noKind] })).toBeNull();
 	});
 
 	it('rejects an empty or oversized moments array', () => {
-		expect(validateDealInMoments({ moments: [] })).toBeNull();
-		expect(
-			validateDealInMoments({ moments: [goodMoment(), goodMoment(), goodMoment(), goodMoment()] })
-		).toBeNull();
+		expect(validateTileMoments({ moments: [] })).toBeNull();
+		expect(validateTileMoments({ moments: Array.from({ length: 6 }, goodMoment) })).toBeNull();
 	});
 
 	it('rejects out-of-range tiles and a seat-0 winner', () => {
 		const bad1 = goodMoment();
 		bad1.dealInTile = 99;
-		expect(validateDealInMoments({ moments: [bad1] })).toBeNull();
+		expect(validateTileMoments({ moments: [bad1] })).toBeNull();
 
 		const bad2 = goodMoment();
 		bad2.winner.seat = 0;
-		expect(validateDealInMoments({ moments: [bad2] })).toBeNull();
+		expect(validateTileMoments({ moments: [bad2] })).toBeNull();
 	});
 
 	it('rejects oversized text-bearing fields (yaku names)', () => {
 		const bad = goodMoment();
 		bad.winner.yaku = [{ name: 'x'.repeat(200), han: 1 }];
-		expect(validateDealInMoments({ moments: [bad] })).toBeNull();
+		expect(validateTileMoments({ moments: [bad] })).toBeNull();
 	});
 });

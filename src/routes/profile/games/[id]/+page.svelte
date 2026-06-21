@@ -3,7 +3,7 @@
 	import { SEAT_NAMES, roundTag, summarize } from '$lib/game/review';
 	import { placeLabel } from '$lib/game/history';
 	import { tileText } from '$lib/game/tiles';
-	import type { ReviewedDealIn } from '$lib/game/tileReview';
+	import type { ReviewedMoment } from '$lib/game/tileReview';
 
 	let { data } = $props();
 
@@ -61,31 +61,36 @@
 	// from the page load, and the endpoint returns the cache on any re-post.
 	let tileBusy = $state(false);
 	let tileError = $state('');
-	let runReviews = $state<ReviewedDealIn[] | null>(null);
+	let runReviews = $state<ReviewedMoment[] | null>(null);
 	const reviews = $derived(runReviews ?? data.game?.tileReview ?? null);
-	const verdictByHand = $derived(
-		reviews ? Object.fromEntries(reviews.map((r) => [`${r.round}-${r.honba}`, r])) : null
-	);
+	// A hand can have more than one reviewed moment (e.g. a riichi then a deal-in),
+	// so group the verdicts per hand into a list.
+	const verdictsByHand = $derived.by(() => {
+		if (!reviews) return null;
+		const byHand: Record<string, ReviewedMoment[]> = {};
+		for (const r of reviews) (byHand[`${r.round}-${r.honba}`] ??= []).push(r);
+		return byHand;
+	});
 
-	const hasDealIns = $derived(
-		data.game?.rounds.some((r) => r.outcome === 'ron' && r.loser === 0) ?? false
-	);
+	// Any saved game with a replay can be reviewed — the extractor finds the
+	// reviewable moments (deal-ins, riichi declarations); an empty result is handled.
+	const canReview = $derived(data.game?.hasReplay ?? false);
 
 	async function runTileReview(gameId: number) {
 		if (tileBusy || reviews) return;
 		tileBusy = true;
 		tileError = '';
 		try {
-			const [res, { replayGame }, { dealInMoments }] = await Promise.all([
+			const [res, { replayGame }, { reviewMoments }] = await Promise.all([
 				fetch(`/api/games/${gameId}/replay`),
 				import('$lib/game/replay'),
 				import('$lib/game/tileReview')
 			]);
 			if (!res.ok) throw new Error(`replay fetch failed (${res.status})`);
 			const { final } = await replayGame(await res.json());
-			const moments = dealInMoments(final.events);
+			const moments = reviewMoments(final.events);
 			if (moments.length === 0) {
-				tileError = 'No reviewable deal-ins in this game.';
+				tileError = 'No reviewable moments in this game.';
 				return;
 			}
 			const reviewRes = await fetch(`/api/games/${gameId}/tile-review`, {
@@ -94,7 +99,7 @@
 				body: JSON.stringify({ moments })
 			});
 			if (!reviewRes.ok) throw new Error(`review failed (${reviewRes.status})`);
-			runReviews = ((await reviewRes.json()) as { reviews: ReviewedDealIn[] }).reviews;
+			runReviews = ((await reviewRes.json()) as { reviews: ReviewedMoment[] }).reviews;
 		} catch (e) {
 			console.error('tile review failed', e);
 			tileError = 'Tile review unavailable right now.';
@@ -178,21 +183,17 @@
 				</span>
 			</p>
 
-			{#if hasDealIns}
+			{#if canReview}
 				<div class="tile-review-bar">
 					<button
 						class="tile-review-btn"
 						onclick={() => runTileReview(g.id)}
 						disabled={tileBusy || reviews !== null}
 					>
-						{tileBusy
-							? 'Analyzing your deal-ins…'
-							: reviews
-								? 'Reviewed ✓'
-								: 'Tile review 牌譜検討'}
+						{tileBusy ? 'Analyzing your game…' : reviews ? 'Reviewed ✓' : 'Tile review 牌譜検討'}
 					</button>
 					<span class="export-sub">
-						{#if tileError}{tileError}{:else}Claude judges the exact tiles you dealt in with —
+						{#if tileError}{tileError}{:else}Claude judges your deal-ins and riichi declarations —
 							verdicts appear on the rounds below{/if}
 					</span>
 				</div>
@@ -212,7 +213,7 @@
 		<section class="rounds">
 			{#each g.rounds as r, i (i)}
 				{@const m = summarize(r)}
-				{@const tr = verdictByHand?.[`${r.round}-${r.honba}`]}
+				{@const trs = verdictsByHand?.[`${r.round}-${r.honba}`]}
 				<article class="round" data-kind={m.kind}>
 					<div class="round-head">
 						<span class="round-tag">{roundTag(r.round, r.honba)}</span>
@@ -225,19 +226,23 @@
 						</span>
 					</div>
 					<p class="round-text">{m.text}</p>
-					{#if tr}
+					{#each trs ?? [] as tr ((tr.kind ?? 'deal-in') + '-' + tr.dealInTile)}
 						<div class="tile-verdict" data-verdict={tr.verdict}>
 							<div class="verdict-head">
 								<span class="verdict-chip">{tr.verdict}</span>
 								<span class="verdict-tile">
-									dealt in with {tileText(tr.dealInTile)}{tr.forcedByRiichi
-										? ' (forced — you were in riichi)'
-										: ''}
+									{#if tr.kind === 'riichi'}
+										riichi declared on {tileText(tr.dealInTile)}
+									{:else}
+										dealt in with {tileText(tr.dealInTile)}{tr.forcedByRiichi
+											? ' (forced — you were in riichi)'
+											: ''}
+									{/if}
 								</span>
 							</div>
 							<p class="verdict-advice">{tr.advice}</p>
 						</div>
-					{/if}
+					{/each}
 					<div class="round-scores">
 						{#each r.scoresAfter as score, seat (seat)}
 							<span class="rs" class:you={seat === 0}>{SEAT_NAMES[seat]} {score}</span>
