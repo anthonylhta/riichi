@@ -3,15 +3,15 @@ import type { RequestHandler } from './$types';
 import { getOrCreateUser } from '$lib/server/users';
 import { getGameTileReview, saveGameTileReview } from '$lib/server/games';
 import { getTileReview } from '$lib/server/tileReview';
-import { validateDealInMoments } from '$lib/server/validate';
+import { validateTileMoments } from '$lib/server/validate';
 import { rateLimit } from '$lib/server/rateLimit';
-import { mergeReviewedDealIns } from '$lib/game/tileReview';
+import { mergeReviewedMoments } from '$lib/game/tileReview';
 
-// Tile-level deal-in review, cached per game (ADR 0055). Signed-in only — the
-// verdicts hang off a saved game the caller must own (a foreign id is a plain
-// 404, same as the rest of /api/games). First run: the client posts the ≤3
-// moments it extracted from the replay; Claude's verdicts are merged into the
-// render-ready ReviewedDealIn[] shape, cached on the row, and returned. Every
+// Tile-level review, cached per game (ADR 0055). Signed-in only — the verdicts
+// hang off a saved game the caller must own (a foreign id is a plain 404, same as
+// the rest of /api/games). First run: the client posts the ≤5 pivotal moments it
+// extracted from the replay (deal-ins + riichi declarations); Claude's verdicts
+// are merged into the render-ready ReviewedMoment[] shape, cached on the row. Every
 // later call returns the cache without spending anything — so the rate limit
 // guards only the Claude path.
 export const POST: RequestHandler = async ({ params, request, locals, getClientAddress }) => {
@@ -46,13 +46,13 @@ export const POST: RequestHandler = async ({ params, request, locals, getClientA
 		} catch {
 			return json({ error: 'Bad request' }, { status: 400 });
 		}
-		const moments = validateDealInMoments(body);
+		const moments = validateTileMoments(body);
 		if (!moments) {
 			return json({ error: 'Bad request' }, { status: 400 });
 		}
 
 		const result = await getTileReview(moments);
-		const reviews = mergeReviewedDealIns(moments, result);
+		const reviews = mergeReviewedMoments(moments, result);
 		// Best-effort: a failed cache write must not cost the player the review
 		// they just paid for.
 		const saved = await saveGameTileReview(userId, gameId, reviews).catch((e) => {

@@ -1,6 +1,9 @@
 // Tile-level review — the moment extractor. Walks the GameEvent record
-// (events.ts) and pulls out every DEAL-IN: the exact discard of yours that got
-// ronned, together with the decision state as you saw it at that instant.
+// (events.ts) and pulls out the pivotal decisions of YOUR game, each with the
+// decision state as you saw it at that instant. Two kinds today:
+//   - 'deal-in'  — the exact discard of yours that got ronned.
+//   - 'riichi'   — a riichi declaration of yours (was committing right?).
+// (push/fold junctions are a planned third kind — see ADR 0070.)
 // Pure and client-side (the events come from replaying the stored ReplayLog in
 // the browser, the same way the exports work); only these flagged moments are
 // sent to /api/tile-review for Claude's verdict — never the full game.
@@ -19,6 +22,8 @@
 import type { TileCode } from './tiles';
 import type { GameEvent } from './events';
 
+export type MomentKind = 'deal-in' | 'riichi';
+
 export interface DealInMeld {
 	type: string;
 	tiles: TileCode[];
@@ -27,7 +32,7 @@ export interface DealInMeld {
 export interface DealInSeat {
 	seat: number;
 	isYou: boolean;
-	isRiichi: boolean; // declared before your deal-in discard
+	isRiichi: boolean; // declared before your decision
 	score: number; // start-of-round score, minus 1000 per declared riichi
 	discards: TileCode[]; // their river as displayed (called tiles removed)
 	melds: DealInMeld[];
@@ -41,7 +46,8 @@ export interface DealInWinner {
 	yaku: { name: string; han: number }[];
 }
 
-export interface DealInMoment {
+// The shared visible-state snapshot every moment kind carries.
+interface MomentBase {
 	round: number; // 1–8 (East 1–4, South 1–4)
 	honba: number;
 	turn: number; // this was your Nth discard of the round
@@ -49,24 +55,37 @@ export interface DealInMoment {
 	doraIndicators: TileCode[];
 	hand: TileCode[]; // your concealed tiles BEFORE the discard (incl. the drawn tile)
 	melds: DealInMeld[]; // your melds
+	safeTiles: TileCode[]; // tiles in `hand` that were genbutsu vs a riichi opponent
+	seats: DealInSeat[];
+}
+
+export interface DealInMoment extends MomentBase {
+	kind: 'deal-in';
 	dealInTile: TileCode;
 	// True when you were already locked in riichi, so the discard was a forced
 	// tsumogiri — the reviewable decision was the riichi itself, not this tile.
 	forcedByRiichi: boolean;
-	safeTiles: TileCode[]; // tiles in `hand` that were genbutsu vs the winner
 	winner: DealInWinner;
-	seats: DealInSeat[];
 }
+
+export interface RiichiMoment extends MomentBase {
+	kind: 'riichi';
+	riichiTile: TileCode; // the tile you cut to declare
+}
+
+export type TileMoment = DealInMoment | RiichiMoment;
 
 // The live wall holds 70 drawable tiles after the deal; each normal draw takes
 // one, and each kan takes one more off the tail (the rinshan draw's dead-wall
 // replenishment — ADR 0042).
 const DRAWABLE_AFTER_DEAL = 70;
 
-const MAX_MOMENTS = 3;
+// Total moments sent to Claude per game, across all kinds — the spend ceiling.
+const MAX_MOMENTS = 5;
 
-export function dealInMoments(events: GameEvent[]): DealInMoment[] {
-	const all: DealInMoment[] = [];
+export function reviewMoments(events: GameEvent[]): TileMoment[] {
+	const dealIns: DealInMoment[] = [];
+	const riichis: RiichiMoment[] = [];
 
 	// Per-round tracking, reset at every round_start.
 	let round = 1;
@@ -85,7 +104,7 @@ export function dealInMoments(events: GameEvent[]): DealInMoment[] {
 	// The decision snapshot of your latest discard, assembled eagerly so a win
 	// event can just attach the winner. Cleared by any other human action so a
 	// chankan (robbed kakan) never masquerades as a discard deal-in.
-	let pending: Omit<DealInMoment, 'winner' | 'safeTiles'> | null = null;
+	let pending: Omit<DealInMoment, 'winner'> | null = null;
 	// Safety is judged at the DECISION, so the per-seat genbutsu intersection is
 	// computed in the snapshot too — by win time, passedBy already (wrongly, for
 	// this purpose) contains the deal-in tile itself.
@@ -127,7 +146,7 @@ export function dealInMoments(events: GameEvent[]): DealInMoment[] {
 					// already in riichi — the declaring discard itself is a choice.
 					const handCodes = [...new Set(hand.map((t) => t.code))];
 					pendingSafe = [0, 1, 2, 3].map((s) => handCodes.filter((c) => passedBy[s].has(c)));
-					pending = {
+					const base: MomentBase = {
 						round,
 						honba,
 						turn: humanDiscards,
@@ -135,8 +154,7 @@ export function dealInMoments(events: GameEvent[]): DealInMoment[] {
 						doraIndicators: [...dora],
 						hand: hand.map((t) => t.code),
 						melds: melds[0].map((m) => ({ ...m, tiles: [...m.tiles] })),
-						dealInTile: ev.tile.code,
-						forcedByRiichi: riichi[0] && !ev.riichi,
+						safeTiles: [], // deal-in fills this per winner at win time
 						seats: [0, 1, 2, 3].map((s) => ({
 							seat: s,
 							isYou: s === 0,
@@ -146,6 +164,25 @@ export function dealInMoments(events: GameEvent[]): DealInMoment[] {
 							melds: melds[s].map((m) => ({ ...m, tiles: [...m.tiles] }))
 						}))
 					};
+					pending = {
+						...base,
+						kind: 'deal-in',
+						dealInTile: ev.tile.code,
+						forcedByRiichi: riichi[0] && !ev.riichi
+					};
+					// Your riichi declaration is itself a reviewable decision, regardless
+					// of how the hand ends. safeTiles here = genbutsu vs every opponent
+					// already in riichi (the tiles you could fold to instead of pushing).
+					if (ev.riichi) {
+						const threats = [1, 2, 3].filter((s) => riichi[s]);
+						const safe = handCodes.filter((c) => threats.every((s) => passedBy[s].has(c)));
+						riichis.push({
+							...base,
+							kind: 'riichi',
+							riichiTile: ev.tile.code,
+							safeTiles: threats.length ? safe : []
+						});
+					}
 					hand = hand.filter((t) => t.id !== ev.tile.id);
 				} else {
 					pending = null;
@@ -197,7 +234,7 @@ export function dealInMoments(events: GameEvent[]): DealInMoment[] {
 				// discard it (a robbed kakan clears `pending` above).
 				if (ev.from === 0 && ev.seat !== 0 && pending) {
 					const w = ev.seat;
-					all.push({
+					dealIns.push({
 						...pending,
 						safeTiles: pendingSafe[w],
 						winner: {
@@ -218,11 +255,25 @@ export function dealInMoments(events: GameEvent[]): DealInMoment[] {
 		}
 	}
 
-	// Cap the spend: keep the costliest deal-ins, presented in game order.
-	return all
-		.sort((a, b) => b.winner.score - a.winner.score)
+	// A forced-riichi deal-in is the SAME decision as the riichi declaration that
+	// locked the hand (same round) — drop it in favour of the riichi moment.
+	const riichiHands = new Set(riichis.map((m) => `${m.round}-${m.honba}`));
+	const keptDealIns = dealIns.filter(
+		(m) => !(m.forcedByRiichi && riichiHands.has(`${m.round}-${m.honba}`))
+	);
+
+	// Cap the spend across all kinds: weight deal-ins (costliest first) above
+	// riichi declarations, take the top few, then present in game order (turn
+	// breaks ties so a riichi reads before its hand's later deal-in).
+	const weighted: { m: TileMoment; w: number }[] = [
+		...keptDealIns.map((m) => ({ m: m as TileMoment, w: 10_000_000 + m.winner.score })),
+		...riichis.map((m) => ({ m: m as TileMoment, w: 1_000_000 }))
+	];
+	return weighted
+		.sort((a, b) => b.w - a.w)
 		.slice(0, MAX_MOMENTS)
-		.sort((a, b) => a.round - b.round || a.honba - b.honba);
+		.map((x) => x.m)
+		.sort((a, b) => a.round - b.round || a.honba - b.honba || a.turn - b.turn);
 }
 
 // What the server returns, rendered under the matching round card.
@@ -235,33 +286,36 @@ export interface TileReviewResult {
 	verdicts: DealInVerdict[]; // aligned with the posted moments
 }
 
-// One reviewed deal-in, exactly as the UI renders it — moment identity plus
-// the verdict, merged server-side and cached on the games row (ADR 0055) so a
-// revisit renders instantly and a re-click never re-pays.
-export interface ReviewedDealIn {
+// One reviewed moment, exactly as the UI renders it — moment identity plus the
+// verdict, merged server-side and cached on the games row (ADR 0055) so a revisit
+// renders instantly and a re-click never re-pays. `kind` is optional for backward
+// compatibility: rows cached before riichi moments existed have no kind and are
+// deal-ins. `tile` is the focal tile (the dealt-in tile, or the riichi discard).
+export interface ReviewedMoment {
+	kind?: MomentKind;
 	round: number;
 	honba: number;
-	dealInTile: TileCode;
-	forcedByRiichi: boolean;
+	dealInTile: TileCode; // focal tile (kept name for cache backward-compat)
+	forcedByRiichi: boolean; // deal-in only; false for riichi
 	verdict: DealInVerdict['verdict'];
 	advice: string;
 }
 
 // Merge the flagged moments with Claude's verdicts into the render-ready,
-// cacheable shape — keeping only the moment identity the card needs (round,
-// honba, the dealt-in tile, whether it was a forced riichi tsumogiri) and
-// dropping the heavy decision snapshot, which has already served its purpose
-// in the prompt. The result is what gets stored on the games row and returned
-// to the client. Indices align: verdicts[i] is the verdict for moments[i].
-export function mergeReviewedDealIns(
-	moments: DealInMoment[],
+// cacheable shape — keeping only the moment identity the card needs and dropping
+// the heavy decision snapshot, which has already served its purpose in the prompt.
+// The result is stored on the games row and returned to the client. Indices align:
+// verdicts[i] is the verdict for moments[i].
+export function mergeReviewedMoments(
+	moments: TileMoment[],
 	result: TileReviewResult
-): ReviewedDealIn[] {
+): ReviewedMoment[] {
 	return moments.map((m, i) => ({
+		kind: m.kind,
+		dealInTile: m.kind === 'deal-in' ? m.dealInTile : m.riichiTile,
+		forcedByRiichi: m.kind === 'deal-in' ? m.forcedByRiichi : false,
 		round: m.round,
 		honba: m.honba,
-		dealInTile: m.dealInTile,
-		forcedByRiichi: m.forcedByRiichi,
 		verdict: result.verdicts[i].verdict,
 		advice: result.verdicts[i].advice
 	}));
