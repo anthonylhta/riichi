@@ -6,7 +6,7 @@ import type { RoundRecord } from '$lib/game/review';
 import type { ReplayLog } from '$lib/game/replay';
 import type { GameStats } from '$lib/game/profile';
 import type { GameDetail, GameListItem } from '$lib/game/history';
-import type { ReviewedDealIn } from '$lib/game/tileReview';
+import type { ReviewedMoment } from '$lib/game/tileReview';
 
 export interface SavedGameInput {
 	finalScores: [number, number, number, number];
@@ -111,7 +111,7 @@ export async function getGame(userId: number, gameId: number): Promise<GameDetai
 		liked: r.liked,
 		rounds: r.rounds as RoundRecord[],
 		hasReplay: r.hasReplay,
-		tileReview: (r.tileReview as ReviewedDealIn[] | null) ?? null
+		tileReview: (r.tileReview as ReviewedMoment[] | null) ?? null
 	};
 }
 
@@ -121,7 +121,7 @@ export async function getGame(userId: number, gameId: number): Promise<GameDetai
 export async function getGameTileReview(
 	userId: number,
 	gameId: number
-): Promise<{ found: boolean; review: ReviewedDealIn[] | null }> {
+): Promise<{ found: boolean; review: ReviewedMoment[] | null }> {
 	const db = getDb();
 	const rows = await db
 		.select({ tileReview: games.tileReview })
@@ -129,7 +129,7 @@ export async function getGameTileReview(
 		.where(and(eq(games.id, gameId), eq(games.userId, userId)))
 		.limit(1);
 	if (!rows.length) return { found: false, review: null };
-	return { found: true, review: (rows[0].tileReview as ReviewedDealIn[] | null) ?? null };
+	return { found: true, review: (rows[0].tileReview as ReviewedMoment[] | null) ?? null };
 }
 
 // Cache the server-authored verdicts on the game row. Ownership in the WHERE,
@@ -137,7 +137,7 @@ export async function getGameTileReview(
 export async function saveGameTileReview(
 	userId: number,
 	gameId: number,
-	review: ReviewedDealIn[]
+	review: ReviewedMoment[]
 ): Promise<boolean> {
 	const db = getDb();
 	const updated = await db
