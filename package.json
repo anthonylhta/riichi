@@ -14,6 +14,7 @@
 		"format": "prettier --write .",
 		"test": "vitest run",
 		"test:watch": "vitest",
+		"puzzles:check": "PUZZLES_PRINT=1 vitest run src/lib/server/puzzles.test.ts",
 		"db:push": "NODE_OPTIONS='--dns-result-order=ipv4first --no-network-family-autoselection' drizzle-kit push",
 		"db:studio": "NODE_OPTIONS='--dns-result-order=ipv4first --no-network-family-autoselection' drizzle-kit studio"
 	},
