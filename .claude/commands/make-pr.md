@@ -1,1 +1,0 @@
-Run `npm run check`, `npm run lint`, and `npm run test` in parallel. If all three pass, create a GitHub PR for the current branch using `gh pr create`. If any fail, report the errors and do not create the PR.
