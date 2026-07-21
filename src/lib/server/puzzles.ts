@@ -18,6 +18,12 @@
 // standard notation — 1m..9m / 1p..9p / 1s..9s / 1z..7z (1z=East 2z=South 3z=West
 // 4z=North, 5z=White 6z=Green 7z=Red dragon). Write the explanation against the
 // derived best discard (run puzzles:check first). Order is the curriculum order.
+//
+// `doraIndicator` is decorative — nothing derives from it — but pick one whose
+// dora lands on a tile the hand KEEPS. The answer is pure efficiency and knows
+// nothing about tile value, so an indicator pointing at the best discard asks the
+// player to throw the dora away and teaches against itself. puzzles.test.ts
+// enforces this.
 
 export interface AuthoredPuzzle {
 	/** 14 tiles, space-separated standard notation, e.g. "2m 3m 4m ... 1z". */
@@ -133,7 +139,7 @@ export const PUZZLES: AuthoredPuzzle[] = [
 		hand: '3m 3m 5m 6m 7m 2p 3p 4p 5p 6p 8p 9p 4s 5s',
 		seatWind: '2z',
 		roundWind: '1z',
-		doraIndicator: '7p',
+		doraIndicator: '2m',
 		explanation:
 			'Discard 9p (or 8p). The 8p9p is a penchan that only fills on 7p — and your pins already form 2p3p4p5p6p, a run that accepts 1p/4p/7p on its own. Dropping the penchan leaves the 3m pair, 567m, that wide pin run, and a 4s5s ryanmen: a 1-shanten taking 1p/4p/7p and 3s/6s (19 tiles). The penchan was adding nothing the run did not already cover.'
 	},
@@ -142,7 +148,7 @@ export const PUZZLES: AuthoredPuzzle[] = [
 		hand: '2m 3m 4m 6m 7m 8m 5p 5p 6p 7p 2s 3s 5s 6s',
 		seatWind: '3z',
 		roundWind: '1z',
-		doraIndicator: '4p',
+		doraIndicator: '1s',
 		explanation:
 			'Discard 5p. The 5p5p6p7p reads like a pair plus a ryanmen, but it is more efficient as the run 5p6p7p with a spare 5p. Folding the duplicate in leaves 234m, 678m, that pin run, and the 2s3s / 5s6s ryanmen — a 1-shanten accepting nearly the whole sou suit (1s–7s; 24 tiles).'
 	},
@@ -178,7 +184,7 @@ export const PUZZLES: AuthoredPuzzle[] = [
 		hand: '2m 2m 4m 5m 6m 7m 8m 9m 8p 9p 5p 6p 3s 4s',
 		seatWind: '1z',
 		roundWind: '1z',
-		doraIndicator: '7p',
+		doraIndicator: '1m',
 		explanation:
 			'Discard 9p (or 8p). With the 2m pair, 456m and 789m complete, and ryanmen at 5p6p and 3s4s, the 8p9p penchan is the weakest block — it only reaches on 7p, already covered by 5p6p. Drop it for a clean 1-shanten on 4p/7p and 2s/5s (16 tiles).'
 	},
@@ -187,7 +193,7 @@ export const PUZZLES: AuthoredPuzzle[] = [
 		hand: '3m 4m 5m 7m 8m 9m 7p 7p 8p 9p 2s 3s 5s 6s',
 		seatWind: '2z',
 		roundWind: '1z',
-		doraIndicator: '6p',
+		doraIndicator: '2m',
 		explanation:
 			'Discard 7p. The 7p7p8p9p is better read as the run 7p8p9p with an extra 7p than as a pair plus a penchan. Dropping the spare leaves 345m, 789m, 789p, and the 2s3s / 5s6s ryanmen — a 1-shanten taking 1s–7s (24 tiles).'
 	},
@@ -313,7 +319,7 @@ export const PUZZLES: AuthoredPuzzle[] = [
 		hand: '9p 9p 2m 3m 4m 5m 6m 7m 8s 9s 5s 6s 3p 4p',
 		seatWind: '2z',
 		roundWind: '1z',
-		doraIndicator: '7s',
+		doraIndicator: '8p',
 		explanation:
 			'Discard 9s (or 8s). The 8s9s penchan only fills on 7s, already accepted by your 5s6s ryanmen, so it adds nothing. Cut it to keep the 9p pair, 234m, 567m, and the 3p4p / 5s6s ryanmen — a clean 1-shanten on 2p/5p and 4s/7s (16 tiles).'
 	},

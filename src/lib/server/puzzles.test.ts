@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PUZZLES } from './puzzles';
 import { buildPuzzle, selectPuzzleIndex } from './handOfTheDay';
-import { toEffStr } from '$lib/game/tiles';
+import { toEffStr, doraFromIndicator } from '$lib/game/tiles';
 
 // Validates the whole curated pool against the real efficiency lib, so a malformed
 // or non-instructive authored hand fails CI instead of reaching a visitor. Set
@@ -34,6 +34,10 @@ describe('curated Hand-of-the-Day pool', () => {
 		expect(new Set(p.hand).size).toBeGreaterThan(1);
 		// Explanation written and references the answer's notation somewhere.
 		expect(p.explanation.length).toBeGreaterThan(20);
+		// The indicator feeds nothing, so nothing else would catch it pointing at the
+		// answer — and "discard the dora" is a position that teaches against itself,
+		// since the derived answer is pure efficiency and ignores tile value.
+		expect(p.bestDiscards).not.toContain(doraFromIndicator(p.doraIndicator));
 	});
 });
 
